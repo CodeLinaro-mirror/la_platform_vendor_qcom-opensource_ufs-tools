@@ -1,0 +1,2 @@
+PRODUCT_PACKAGES += lsufs
+PRODUCT_PACKAGES += ufseom
