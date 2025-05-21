@@ -17,6 +17,8 @@ struct EOMData {
 	int data_cnt;
 	int num_lanes;
 	int local_peer;
+	int gear;
+	int rate;
 
 	struct eom_result *er;
 };
