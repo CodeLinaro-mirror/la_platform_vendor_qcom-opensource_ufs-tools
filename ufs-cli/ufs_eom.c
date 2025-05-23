@@ -124,7 +124,7 @@ static uint64_t fast_rand64(uint64_t *seed)
 {
 	uint64_t val = *seed;
 
-	val = (59000370003845LL * val + 3037000493LL);
+	val = (370003845LL * val + 3037000493LL);
 	*seed = val & 0x1F;
 
 	return val & 0x7FFFFFFFFFFFFFFFLL;
@@ -134,7 +134,7 @@ static void populate_data_pattern(char *buffer)
 {
 	unsigned int i, val;
 	unsigned int size = EOM_TEMP_DATA_SIZE / sizeof(int);
-	uint64_t seed = 99098;
+	uint64_t seed = rand();
 	int *buf = (int *)buffer;
 
 	for (i = 0; i < size; i++) {
@@ -350,17 +350,18 @@ repeat_eom_scan:
 	if (!do_io)
 		goto skip_io;
 
-	if (peer == PEER) {
-		/* Write to excercise peer device's Rx */
-		ret = pwrite(tmp_fd, tmp_buf, EOM_TEMP_DATA_SIZE, 0);
-		if (ret < 0) {
-			pr_err("Failed to write tmp file\n");
-			return ERROR;
-		}
-	} else {
+	/* Write to excercise peer device's Rx */
+	populate_data_pattern(tmp_buf);
+	ret = pwrite(tmp_fd, tmp_buf, EOM_TEMP_DATA_SIZE, 0);
+	if (ret < 0) {
+		pr_err("Failed to write tmp file\n");
+		return ERROR;
+	}
+
+	if (peer == LOCAL) {
 		/* Read to excercise local device's Rx */
 		ret = pread(tmp_fd, tmp_buf, EOM_TEMP_DATA_SIZE, 0);
-		if (ret < 0){
+		if (ret < 0) {
 			pr_err("Failed to read tmp file\n");
 			return ERROR;
 		}
@@ -725,14 +726,6 @@ int main(int argc, char *argv[])
 		pr_err("Failed to allocate memory for I/O\n");
 		ret = ERROR;
 		goto close_tmp;
-	}
-
-	/* Prepare temp file for I/O */
-	populate_data_pattern(tmp_buf);
-	ret = pwrite(tmp_fd, tmp_buf, EOM_TEMP_DATA_SIZE, 0);
-	if (ret < 0) {
-		pr_err("Failed to create tmp file for I/O\n");
-		goto out;
 	}
 
 skip_io_prepare:
