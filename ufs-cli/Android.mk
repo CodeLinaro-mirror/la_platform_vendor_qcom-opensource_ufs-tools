@@ -3,7 +3,7 @@ LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 LOCAL_MODULE := lsufs
 LOCAL_MODULE_TAGS := optional
-LOCAL_SRC_FILES:= shell.c uic.c query.c ufs_bsg.c common.c lsufs.c
+LOCAL_SRC_FILES:= shell.c uic.c query.c ufs_bsg.c common.c lsufs.c query_trans.c
 LOCAL_SHARED_LIBRARIES := libcutils libc
 LOCAL_C_INCLUDES+= $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include
 LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
@@ -13,7 +13,7 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 LOCAL_MODULE := ufseom
 LOCAL_MODULE_TAGS := optional
-LOCAL_SRC_FILES:= uic.c query.c ufs_bsg.c common.c ufs_eom.c json.c
+LOCAL_SRC_FILES:= uic.c query.c ufs_bsg.c common.c ufs_eom.c json.c query_trans.c
 LOCAL_SHARED_LIBRARIES := libcutils libc
 LOCAL_C_INCLUDES+= $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include
 LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
