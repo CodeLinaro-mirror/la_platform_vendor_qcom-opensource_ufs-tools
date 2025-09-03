@@ -40,10 +40,6 @@ class ufs_eye_monitor_plot(object):
             num = int(str_val.split(',')[0])
         return num
 
-    def quit_with_err_msg(self, msg):
-        print('ERROR: {:s}'.format(msg))
-        exit(-1)
-
     def open_file(self, filename):
         self.file_name = filename
         self.fd = open(self.file_name, 'r')
@@ -161,14 +157,17 @@ class ufs_eye_monitor_plot(object):
                 key = 't#{:d}#v#{:d}'.format(timing, voltage)
                 self.lane1_data[key] = error_count
             else:
-                self.quit_with_err_msg('wrong lane number on line {:d}'.format(self.line_no))
+                print('wrong lane number on line {:d}'.format(self.line_no))
+                return False
 
         if self.bad_data_count != 0:
-            return
+            return False
         if self.timing_step == 0:
-            self.quit_with_err_msg('Missing this line: TimingMaxSteps <>, TimingMaxOffset <>')
+            print('Missing this line: TimingMaxSteps <>, TimingMaxOffset <>')
+            return False
         if self.voltage_step == 0:
-            self.quit_with_err_msg('Missing this line: VoltageMaxSteps <>, VoltageMaxOffset <>')
+            print('Missing this line: VoltageMaxSteps <>, VoltageMaxOffset <>')
+            return False
 
         print('-' * 50)
         print('Parsed [{:d}] lines from the log file [{:s}]\n'.format(self.line_no, filename))
@@ -198,7 +197,7 @@ class ufs_eye_monitor_plot(object):
                             self.lane1_error_count_list.append(INVALID_ERROR_COUNT)
                     else:
                         print('wrong lane_no')
-                        return
+                        return False
 
         #Lane-0 data tweaks
         self.lane0_timing_list_set = sorted(set(self.lane0_timing_list), key=int)
@@ -235,9 +234,11 @@ class ufs_eye_monitor_plot(object):
         for lane in self.lane_list:
             missing_data_count = self.validate_data(lane)
             if missing_data_count != 0:
-                return
+                return False
             # Calculate eye center
-            self.calculate_eye_width_center(lane)
+            eye_width_result = self.calculate_eye_width_center(lane)
+            if eye_width_result == False:
+                return False
             self.eom_pass.append(self.plot_eye(lane))
 
         return all(self.eom_pass)
@@ -265,7 +266,7 @@ class ufs_eye_monitor_plot(object):
             max_volt = self.lane1_voltage_list_set[-1]
         else:
             print('wrong lane_no')
-            return
+            return False
 
         max_volt += 1
         for time in range(min_time, max_time):
@@ -313,7 +314,7 @@ class ufs_eye_monitor_plot(object):
             lane_data = self.lane1_data
         else:
             print('wrong lane_no in calculate_eye_center')
-            return
+            return False
 
         # Find right and left eye boundaries using the helper function
         right_eye_width_boundary = self.find_eye_width_boundary(lane_data, 'right')
@@ -371,7 +372,7 @@ class ufs_eye_monitor_plot(object):
             lane_voltage_list_set = self.lane1_voltage_list_set
         else:
             print('wrong lane_no')
-            return
+            return False
 
         if self.gear == 5:
             eye_width = T_EYE_HS_G5_RX/2/self.timing_step
@@ -420,6 +421,8 @@ class ufs_eye_monitor_plot(object):
                         self.single_lane_eom_pass = False
                     if e == INVALID_ERROR_COUNT:
                         self.single_lane_eom_skip_result = True
+            else:
+                self.single_lane_eom_pass = False
 
         title = title_1 + '\n' + title_2 + '\n' + title_3
         ax2.set_title(title, fontsize=17, fontweight='bold', loc='center')
