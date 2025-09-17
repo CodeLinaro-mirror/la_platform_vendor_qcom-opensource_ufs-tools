@@ -16,46 +16,13 @@
 #include <unistd.h>
 #include <malloc.h>
 #include <errno.h>
-#include <unistd.h>
 #include <time.h>
 #include "common.h"
 #include "query.h"
+#include "ufs_eom.h"
 #include "uic.h"
 
-#define EOM_VERSION  "1.0"
-
-#define EOM_TARGET_TEST_COUNT_DEFAULT	0x5D
-#define EOM_TARGET_TEST_COUNT_MAX	0x7F
-#define EOM_PHY_ERROR_COUNT_THRESHOLD	0x3C
-#define EOM_DIRECTION_SHIFT		0x6
-#define EOM_STEP_MASK			0x3F
-#define EOM_TEMP_DATA_SIZE		4 * 1024 * 1024	//4MB file
-#define EOM_TEMP_DATA_MEM_ALIGN_SIZE	4096
-#define EOM_SUPPORTED_MIN_GEAR		4
-#define EOM_TIMING_VOLTAGE_INIT		0xFF
-
-#define STRING_BUFFER_SIZE		0x24
-
-struct eom_result {
-	int lane;
-	int timing;
-	int volt;
-	int error_cnt;
-};
-
-struct EOMData {
-	int timing_max_steps;
-	int timing_max_offset;
-	int voltage_max_steps;
-	int voltage_max_offset;
-	int data_cnt;
-	int num_lanes;
-	int local_peer;
-	int gear;
-	int rate;
-
-	struct eom_result *er;
-} eom_data;
+struct EOMData eom_data;
 
 static char output_path[DEVICE_PATH_NAME_SIZE_MAX];
 static char device_path[DEVICE_PATH_NAME_SIZE_MAX];
@@ -72,13 +39,15 @@ static int target_test_count;
 static int eom_result_count;
 static int tmp_fd, bsg_fd;
 static bool do_io;
-static bool verbose;
+bool verbose;
+static bool slt;
 
 extern int generate_json_report(char *eom_file, struct EOMData *data);
+extern int eom_scan_slt(struct EOMData *data, int lane, int target_test_count);
 
 const char *ufseom_help =
 	"\nufseom cli :\n\n"
-	"ufseom [-p | --peer | -l | --local] [-D | --data] [-L | --lane <lane no.>] [--voltage-low <low voltage value>] [--voltage-high <high voltage value>] [--timing-left <left timing value>] [--timing-right <right timing value>] [-T | --target <target test count>] [-o | --output <output>] [-d | --device <device>]\n\n"
+	"ufseom [-p | --peer | -l | --local] [-D | --data] [--slt] [-L | --lane <lane no.>] [--voltage-low <low voltage value>] [--voltage-high <high voltage value>] [--timing-left <left timing value>] [--timing-right <right timing value>] [-T | --target <target test count>] [-o | --output <output>] [-d | --device <device>]\n\n"
 	"-h : help\n"
 	"--version : UFS EOM version\n"
 	"-p | --peer : peer\n"
@@ -89,6 +58,7 @@ const char *ufseom_help =
 	"--voltage-high : collect EOM data from low voltage to high voltage, if it is not given, it defaults to voltage_max_steps\n"
 	"--timing-left : collect EOM data from left timing to right timing, if it is not given, it defaults to -timing_max_steps\n"
 	"--timing-right : collect EOM data from left timing to right timing, if it is not given, it defaults to timing_max_steps\n"
+	"--slt: System Level Test for UFS eye screening\n"
 	"-t | --target : target test count\n"
 	"-o | --output : path to the folder where the EOM report is saved\n"
 	"-V | --verbose : enable detailed EOM information and logs\n"
@@ -103,7 +73,9 @@ const char *ufseom_help =
 	"  4. Collect EOM data for local Rx from voltage 0 to 8:\n"
 	"  ufseom -l -D --voltage-low 0 --voltage-high 8 -o /data/ -d /dev/ufs-bsg0\n"
 	"  5. Collect EOM data for local Rx for voltage from 0 to 8 and timing from -1 to 1:\n"
-	"  ufseom -l -D --voltage-low 0 --voltage-high 8 --timing-left -1 --timing-right 1 -o /data/ -d /dev/ufs-bsg0\n\n"
+	"  ufseom -l -D --voltage-low 0 --voltage-high 8 --timing-left -1 --timing-right 1 -o /data/ -d /dev/ufs-bsg0\n"
+	"  6. Collect EOM data for local SLT\n"
+	"  ufseom -l -D --slt -o /data/ -d /dev/ufs-bsg0\n"
 	"Note that to get accurate EOM data, user should disable UFS driver low power mode features,\n"
 	"such as Clock Scaling, Clock Gating, Suspend/Resume and Auto Hibernate. For example:\n"
 	"$ echo 0 > /sys/devices/<path to platform devices>/*.ufshc/clkscale_enable\n"
@@ -117,7 +89,7 @@ static char *ufseom_short_options = "plDL:t:o:d:V";
 
 static struct option ufseom_long_options[] = {
 	{"peer", no_argument, NULL, 'p'}, /* UFS device */
-	{"local", no_argument, NULL, 'l'}, /* UFS host*/
+	{"local", no_argument, NULL, 'l'}, /* UFS host */
 	{"data", no_argument, NULL, 'D'}, /* Do I/Os */
 	{"lane", required_argument, NULL, 'L'}, /* Lane */
 	{"target", required_argument, NULL, 't'}, /* Target test count */
@@ -128,6 +100,7 @@ static struct option ufseom_long_options[] = {
 	{"voltage-high", required_argument, NULL, 2}, /* Voltage high */
 	{"timing-left", required_argument, NULL, 3}, /* Timing left*/
 	{"timing-right", required_argument, NULL, 4}, /* Timing right */
+	{"slt", no_argument, NULL, 5}, /* SLT mode */
 	{NULL, 0, NULL, 0}
 };
 
@@ -327,7 +300,7 @@ static int config_eom(int peer, int lane, int timing, int volt, int target_count
 	return SUCCESS;
 }
 
-static int eom_scan(int peer, int lane, int timing, int volt, int target_count)
+int eom_scan(int peer, int lane, int timing, int volt, int target_count)
 {
 	struct EOMData *data = &eom_data;
 	int voltage_direction, timing_direction;
@@ -428,12 +401,26 @@ skip_io:
 	goto repeat_eom_scan;
 }
 
+int disable_eye_monitor(int lane, int peer)
+{
+	int ret;
+
+	/* Disable Eye Monitor */
+	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_ENABLE, SELECT_RX(lane)), ATTR_SET_NOR, 0, peer);
+	if (ret) {
+		pr_err("Failed to disable EOM for lane %d\n", lane);
+		return ret;
+	}
+
+	return SUCCESS;
+}
+
 static int generate_eom_report(char *eom_file, struct EOMData *data)
 {
 	char mname[MANUFACTURER_NAME_STRING_DESC_SIZE];
 	char pname[PRODUCT_NAME_STRING_DESC_SIZE];
 	char pver[PRODUCT_REVISION_LEVEL_STRING_DESC_SIZE];
-	int i, ret;
+	int i, l, n, ret;
 	FILE *file;
 
 	ret = get_device_info(mname, pname, pver);
@@ -454,8 +441,26 @@ static int generate_eom_report(char *eom_file, struct EOMData *data)
 	fprintf(file, "VoltageMaxSteps %d VoltageMaxOffset %d\n\n", data->voltage_max_steps, data->voltage_max_offset);
 
 	for (i = 0; i < data->data_cnt; i++)
-		fprintf(file, "lane: %d timing: %d voltage: %d error count: %d\n", data->er[i].lane, data->er[i].timing,
-										   data->er[i].volt, data->er[i].error_cnt);
+		fprintf(file, "lane: %d timing: %d voltage: %d error count: %d\n",
+			data->er[i].lane, data->er[i].timing, data->er[i].volt, data->er[i].error_cnt);
+
+	/* Add SLT mode eye width and height information */
+	if (slt) {
+		for (l = lane, n = data->num_lanes; n > 0; n--, l++) {
+			fprintf(file, "UFS EOM SLT (PassEyeWidth %.2fUI): Lane %d Eye Width %.2fUI (%d steps) - %s\n",
+				data->slt_eye_width_threshold[l],
+				l, data->slt_eye_width[l],
+				data->slt_eye_width_steps[l],
+				(data->slt_eye_width[l] < data->slt_eye_width_threshold[l]) ? "Fail" : "Pass");
+
+			fprintf(file, "UFS EOM SLT (PassEyeHeight %.2fmV): Lane %d Eye Height %.2fmV (%d steps) - %s\n",
+				data->slt_eye_height_threshold[l],
+				l, data->slt_eye_height[l],
+				data->slt_eye_height_steps[l],
+				(data->slt_eye_height[l] < data->slt_eye_height_threshold[l]) ? "Fail" : "Pass");
+		}
+		fprintf(file, "\n");
+	}
 
 	fclose(file);
 	printf("EOM results saved to %s\n", eom_file);
@@ -577,6 +582,10 @@ static int parse_args(int argc, char *argv[])
 		case 4:
 			ret = get_voltage_timing_value_from_cli(&timing_right);
 			break;
+		case 5:
+			slt = true;
+			ret = SUCCESS;
+			break;
 
 		default:
 			pr_err("I cannot understand, please try 'ufseom -h'.\n");
@@ -689,6 +698,29 @@ static void init_eom_operation(void)
 	device_path[0] = '\0';
 }
 
+int eom_scan_range(struct EOMData *data, int lane, int timing_left,
+		   int timing_right, int voltage_low, int voltage_high, int target_test_count)
+{
+	int l, n, t, v, ret;
+
+	for (l = lane, n = data->num_lanes; n > 0; n--, l++) {
+		for (t = timing_left; t <= timing_right; t++) {
+			for (v = voltage_low; v <= voltage_high; v++) {
+				ret = eom_scan(data->local_peer, l, t, v, target_test_count);
+				if (ret) {
+					pr_err("Failed to run EOM Scan range for lane %d\n", l);
+					disable_eye_monitor(l, data->local_peer);
+					return ret;
+				}
+			}
+		}
+
+		disable_eye_monitor(l, data->local_peer);
+	}
+
+	return SUCCESS;
+}
+
 int main(int argc, char *argv[])
 {
 	struct EOMData *data = &eom_data;
@@ -705,7 +737,7 @@ int main(int argc, char *argv[])
 
 	bsg_fd = open(device_path, O_RDWR);
 	if (bsg_fd < 0) {
-		pr_err("Filed to open file %s (%d).\n", device_path, bsg_fd);
+		pr_err("Failed to open file %s (%d).\n", device_path, bsg_fd);
 		return ERROR;
 	}
 
@@ -786,10 +818,9 @@ int main(int argc, char *argv[])
 skip_io_prepare:
 	/* EOM result file naming rule: local/peer_lane_0/_1_targetestcount.eom */
 	snprintf(lane_str, sizeof(lane_str), "%d", lane);
-	snprintf(eom_file_name, sizeof(eom_file_name), "%s_lane_%s_gear_%d_ttc_%d.eom",
-								data->local_peer ? "peer" : "local",
-								(data->num_lanes == 2) ? "0_1" : lane_str,
-								cur_gear, target_test_count);
+	snprintf(eom_file_name, sizeof(eom_file_name), "%s%s_lane_%s_gear_%d_ttc_%d.eom",
+		 data->local_peer ? "peer" : "local", slt ? "_slt" : "",
+		 (data->num_lanes == 2) ? "0_1" : lane_str, cur_gear, target_test_count);
 	len = strlcpy(output_file, output_path, sizeof(output_file));
 	if (len >= sizeof(output_file)) {
 		pr_err("Truncation occurred. Need %zu bytes but output_file is %zu bytes.\n",
@@ -862,7 +893,7 @@ skip_io_prepare:
 		printf("timing_left:%d, timing_right:%d, voltage_low:%d, voltage_high:%d\n",
 					timing_left, timing_right, voltage_low, voltage_high);
 
-	eom_result_count = (timing_right - timing_left + 1) * (voltage_high - voltage_low + 1) * data->num_lanes;
+	eom_result_count = (data->timing_max_steps * 2 + 1) * (data->voltage_max_steps * 2 + 1) * data->num_lanes;
 	eom_result_size = eom_result_count * sizeof(struct eom_result);
 	data->er = malloc(eom_result_size);
 	if (!data->er) {
@@ -878,35 +909,24 @@ skip_io_prepare:
 	printf("Start EOM Scan...\n");
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);
 	/* Main loop starts here */
-	for (l = lane, n = data->num_lanes; n > 0; n--, l++) {
-		for (t = timing_left; t <= timing_right; t++) {
-			for (v = voltage_low; v <= voltage_high; v++) {
-				ret = eom_scan(data->local_peer, l, t, v, target_test_count);
-				if (ret) {
-					pr_err("Fail to run EOM scan\n");
-					goto out;
-				}
-			}
-		}
-
-		/* Disable Eye Monitor */
-		ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_ENABLE, SELECT_RX(l)), ATTR_SET_NOR, 0, data->local_peer);
-		if (ret) {
-			pr_err("Filed to disable EOM for lane %d\n", l);
-			goto out;
-		}
-	}
+	if (slt)
+		ret = eom_scan_slt(data, lane, target_test_count);
+	else
+		ret = eom_scan_range(data, lane, timing_left, timing_right,
+				     voltage_low, voltage_high, target_test_count);
+	if (ret)
+		goto out;
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_end);
 	printf("EOM Scan Finished!\n Time elapsed: %ld seconds\n", ts_end.tv_sec - ts_start.tv_sec);
 
 	ret = generate_eom_report(output_file, data);
 	if (ret)
-		pr_err("Filed to generate EOM report\n");
+		pr_err("Failed to generate EOM report\n");
 
 	ret = generate_json_report(output_file, data);
 	if (ret)
-		pr_err("Filed to generate JSON file\n");
+		pr_err("Failed to generate JSON file\n");
 
 out:
 	free(data->er);

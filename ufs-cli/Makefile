@@ -3,7 +3,7 @@ COMMON_OBJS := uic.o query.o ufs_bsg.o common.o query_trans.o
 
 # Unique objects for each executable
 LSUFS_UNIQUE_OBJS := shell.o lsufs.o
-EOM_UNIQUE_OBJS := ufs_eom.o json.o
+EOM_UNIQUE_OBJS := ufs_eom.o json.o eom_slt.o
 
 # Combined object lists
 LSUFS_OBJS := $(LSUFS_UNIQUE_OBJS) $(COMMON_OBJS)
@@ -30,4 +30,3 @@ clean:
 	@$(RM) lsufs
 	@$(RM) ufseom
 	@echo Done
-

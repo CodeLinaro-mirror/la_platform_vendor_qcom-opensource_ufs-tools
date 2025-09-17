@@ -1,7 +1,5 @@
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 // SPDX-License-Identifier: BSD-3-Clause-Clear
-/*
- * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
- */
 
 #ifndef __UIC_H__
 #define __UIC_H__
@@ -73,6 +71,15 @@ enum uic_operation_target {
 enum uic_operation_dir {
 	TX,
 	RX,
+};
+
+enum ufs_hs_gear {
+	UFS_HS_DONT_CHANGE,		/* Don't change Gear */
+	UFS_HS_G1,			/* HS Gear 1 (default for reset) */
+	UFS_HS_G2,			/* HS Gear 2 */
+	UFS_HS_G3,			/* HS Gear 3 */
+	UFS_HS_G4,			/* HS Gear 4 */
+	UFS_HS_MAX			/* HS Gear MAX */
 };
 
 struct uic_operation {
