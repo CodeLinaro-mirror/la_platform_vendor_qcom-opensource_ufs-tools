@@ -29,6 +29,11 @@ static char device_path[DEVICE_PATH_NAME_SIZE_MAX];
 const static char *ufseom_tmp_file = "ufseom_tmp_data";
 static char *tmp_buf;
 
+/* Global parameters for extended voltage steps range workaround */
+bool need_vstep_wa;
+static int vstep_wa_fd;
+char vstep_wa_path[] = "/sys/devices/platform/soc/1d84000.ufshc/qcom/eom_vstep";
+
 /* Global EOM control parameters */
 static int lane;
 static int voltage_low;
@@ -238,6 +243,7 @@ int get_device_info(char *mname, char *pname, char *pversion)
 static int config_eom(int peer, int lane, int timing, int volt, int target_count)
 {
 	int ret;
+	char vstep_str[U32_TO_STR_SIZE_MAX];
 
 	/* Enable Eye Monitor */
 	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_ENABLE, SELECT_RX(lane)), ATTR_SET_NOR, 1, peer);
@@ -254,10 +260,23 @@ static int config_eom(int peer, int lane, int timing, int volt, int target_count
 	}
 
 	/* Config Eye Monitor voltage steps */
-	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_STEPS, SELECT_RX(lane)), ATTR_SET_NOR, volt, peer);
-	if (ret) {
-		pr_err("Failed to set RX_EYEMON_Voltage_Steps\n");
-		return ret;
+	if (need_vstep_wa) {
+		ret = u32_to_str(RX_EYEMON_VSTEP_WA_ENCODE(volt, lane), vstep_str, U32_TO_STR_SIZE_MAX);
+		if (ret) {
+			pr_err("Failed to covert vstep %d to string\n", volt);
+			return ret;
+		}
+		ret = write(vstep_wa_fd, vstep_str, strlen(vstep_str));
+		if (ret < 0) {
+			pr_err("Failed to set vstep workaround\n");
+			return ret;
+		}
+	} else {
+		ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_STEPS, SELECT_RX(lane)), ATTR_SET_NOR, volt, peer);
+		if (ret) {
+			pr_err("Failed to set RX_EYEMON_Voltage_Steps\n");
+			return ret;
+		}
 	}
 
 	/* Config Eye Monitor target test count */
@@ -307,13 +326,20 @@ int eom_scan(int peer, int lane, int timing, int volt, int target_count)
 	int voltage_steps, timing_steps;
 	int eom_start, eom_tested_count, eom_error_count;
 	int ret;
+	__u8 volt_dir_shift = EOM_DIRECTION_SHIFT;
+	__u8 vstep_mask = EOM_STEP_MASK;
+
+	if (need_vstep_wa) {
+		volt_dir_shift = EOM_DIRECTION_SHIFT_EXT;
+		vstep_mask = EOM_STEP_MASK_EXT;
+	}
 
 	if (volt < 0) {
 		voltage_direction = 1;
-		voltage_steps = (voltage_direction << EOM_DIRECTION_SHIFT) | (-volt & EOM_STEP_MASK);
+		voltage_steps = (voltage_direction << volt_dir_shift) | (-volt & vstep_mask);
 	} else {
 		voltage_direction = 0;
-		voltage_steps = (voltage_direction << EOM_DIRECTION_SHIFT) | (volt & EOM_STEP_MASK);
+		voltage_steps = (voltage_direction << volt_dir_shift) | (volt & vstep_mask);
 	}
 
 	if (timing < 0) {
@@ -728,6 +754,7 @@ int main(int argc, char *argv[])
 	char tmp_file[1024], output_file[1024], eom_file_name[256], lane_str[8];
 	size_t eom_result_size, len;
 	int t, v, l, n, eom_cap, cur_gear, cur_rate, ret;
+	int local_verinfo, unipro_ver;
 
 	init_eom_operation();
 
@@ -875,6 +902,31 @@ skip_io_prepare:
 		goto out;
 	}
 
+	/* Get Unipro version */
+	local_verinfo = uic_get(bsg_fd,
+				UIC_ARG_MIB_SEL(PA_LOCALVERINFO, SELECT_RX(0)),
+				data->local_peer);
+	if (local_verinfo < 0) {
+		pr_err("Failed to get PA_LOCALVERINFO\n");
+		ret = ERROR;
+		goto out;
+	}
+
+	unipro_ver = local_verinfo & UFS_UNIPRO_VER_MASK;
+	if (unipro_ver >= UFS_UNIPRO_VER_3 &&
+	    !(eom_cap & EOM_CAP_EXTENDED_VOLTAGE) &&
+	    data->local_peer == LOCAL) {
+		/* Override voltage_max_steps */
+		data->voltage_max_steps = 127;
+		need_vstep_wa = true;
+
+		vstep_wa_fd = open(vstep_wa_path, O_WRONLY);
+		if (vstep_wa_fd < 0) {
+			pr_err("Failed to open file %s (%d).\n", vstep_wa_path, vstep_wa_fd);
+			return ERROR;
+		}
+	}
+
 	if (verbose) {
 		printf("EOM Capabilities:\n");
 		printf("TimingMaxSteps %d TimingMaxOffset %d\n", data->timing_max_steps, data->timing_max_offset);
@@ -935,6 +987,7 @@ close_tmp:
 	close(tmp_fd);
 close_bsg:
 	close(bsg_fd);
+	close(vstep_wa_fd);
 
 	return ret;
 }

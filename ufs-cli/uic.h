@@ -55,8 +55,25 @@
 #define PA_INITIAL_ADAPT       0x01
 #define PA_NO_ADAPT            0x03
 
+/* Unipro Attributes */
+#define PA_LOCALVERINFO		0x15A9
+
 #define PA_HS_MODE_A		1
 #define PA_HS_MODE_B		2
+
+enum ufs_unipro_ver {
+	UFS_UNIPRO_VER_RESERVED = 0,
+	UFS_UNIPRO_VER_1_40 = 1, /* UniPro version 1.40 */
+	UFS_UNIPRO_VER_1_41 = 2, /* UniPro version 1.41 */
+	UFS_UNIPRO_VER_1_6  = 3, /* UniPro version 1.6 */
+	UFS_UNIPRO_VER_1_61 = 4, /* UniPro version 1.61 */
+	UFS_UNIPRO_VER_1_8  = 5, /* UniPro version 1.8 */
+	UFS_UNIPRO_VER_2  = 6, /* UniPro version 2.0 */
+	UFS_UNIPRO_VER_3  = 7, /* UniPro version 3.0 */
+	UFS_UNIPRO_VER_MAX  = 8, /* UniPro unsupported version */
+	/* UniPro version field mask in PA_LOCALVERINFO */
+	UFS_UNIPRO_VER_MASK = 0xF,
+};
 
 enum uic_operation_mode {
 	GET,

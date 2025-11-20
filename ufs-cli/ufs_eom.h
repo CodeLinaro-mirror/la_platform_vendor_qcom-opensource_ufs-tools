@@ -8,14 +8,16 @@
 #include <stdbool.h>
 
 /* EOM Version */
-#define EOM_VERSION  "1.1"
+#define EOM_VERSION  "1.2"
 
 /* EOM Configuration Constants */
 #define EOM_TARGET_TEST_COUNT_DEFAULT	0x5D
 #define EOM_TARGET_TEST_COUNT_MAX	0x7F
 #define EOM_PHY_ERROR_COUNT_THRESHOLD	0x3C
 #define EOM_DIRECTION_SHIFT		0x6
+#define EOM_DIRECTION_SHIFT_EXT		0x7
 #define EOM_STEP_MASK			0x3F
+#define EOM_STEP_MASK_EXT		0x7F
 #define EOM_TEMP_DATA_SIZE		4 * 1024 * 1024	/* 4MB file */
 #define EOM_TEMP_DATA_MEM_ALIGN_SIZE	4096
 #define EOM_SUPPORTED_MIN_GEAR		4
@@ -24,6 +26,11 @@
 #define EOM_T_EYE_HS_G4_RX_V5		0.48		/* Per M-PHY SPEC V5.0, minimum eye width is 0.48UI for Gear-4 */
 #define EOM_V_DIF_AC_HS_G5_RX_V5	60		/* Per M-PHY SPEC V5.0, minimum eye height is 60mV for Gear-5 */
 #define EOM_V_DIF_AC_HS_G4_RX_V5	80		/* Per M-PHY SPEC V5.0, minimum eye height is 80mV for Gear-4 */
+
+#define EOM_CAP_EXTENDED_VOLTAGE	(1 << 4)
+
+#define RX_EYEMON_VSTEP_WA_LANE_SHIFT	16
+#define RX_EYEMON_VSTEP_WA_ENCODE(v, l)	(v | (l << RX_EYEMON_VSTEP_WA_LANE_SHIFT))
 
 #define STRING_BUFFER_SIZE		0x24
 
