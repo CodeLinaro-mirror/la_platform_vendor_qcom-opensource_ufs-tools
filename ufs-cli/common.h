@@ -21,6 +21,7 @@
 #define ERROR	-2
 
 #define DEVICE_PATH_NAME_SIZE_MAX	256
+#define U32_TO_STR_SIZE_MAX		12
 
 #define pr_err(fmt, ...) fprintf(stderr, fmt, ## __VA_ARGS__)
 
@@ -39,4 +40,5 @@ int get_value_from_cli(int *val);
 int init_device_path(char *path);
 int characteristics_look_up(struct ufs_characteristics *c, __u32 id);
 void dump_hex(__u8 *buf, __u16 len);
+int u32_to_str(uint32_t val, char *buf, size_t size);
 #endif /* __COMMON_H__ */

@@ -98,3 +98,14 @@ void dump_hex(__u8 *buf, __u16 len)
 	if (offset % 16 != 0)
 		printf("\n");
 }
+
+int u32_to_str(uint32_t val, char *buf, size_t size)
+{
+	if (!buf || size == 0) {
+		printf("Invalid buf or size\n");
+		return ERROR;
+	}
+	snprintf(buf, size, "%u", val);
+
+	return SUCCESS;
+}
