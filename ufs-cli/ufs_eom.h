@@ -8,7 +8,7 @@
 #include <stdbool.h>
 
 /* EOM Version */
-#define EOM_VERSION  "1.2"
+#define EOM_VERSION  "1.3"
 
 /* EOM Configuration Constants */
 #define EOM_TARGET_TEST_COUNT_DEFAULT	0x5D
@@ -20,7 +20,7 @@
 #define EOM_STEP_MASK_EXT		0x7F
 #define EOM_TEMP_DATA_SIZE		4 * 1024 * 1024	/* 4MB file */
 #define EOM_TEMP_DATA_MEM_ALIGN_SIZE	4096
-#define EOM_SUPPORTED_MIN_GEAR		4
+#define EOM_SUPPORTED_MIN_GEAR		5
 #define EOM_TIMING_VOLTAGE_INIT		0xFF
 #define EOM_T_EYE_HS_G5_RX_V5		0.3		/* Per M-PHY SPEC V5.0, minimum eye width is 0.3UI for Gear-5 */
 #define EOM_T_EYE_HS_G4_RX_V5		0.48		/* Per M-PHY SPEC V5.0, minimum eye width is 0.48UI for Gear-4 */
