@@ -30,8 +30,7 @@ const static char *ufseom_tmp_file = "ufseom_tmp_data";
 static char *tmp_buf;
 
 /* Global parameters for extended voltage steps range workaround */
-bool need_vstep_wa;
-static int vstep_wa_fd;
+static int vstep_wa_fd = -1;
 char vstep_wa_path[] = "/sys/devices/platform/soc/1d84000.ufshc/qcom/eom_vstep";
 
 /* Global EOM control parameters */
@@ -260,7 +259,7 @@ static int config_eom(int peer, int lane, int timing, int volt, int target_count
 	}
 
 	/* Config Eye Monitor voltage steps */
-	if (need_vstep_wa) {
+	if (vstep_wa_fd >= 0) {
 		ret = u32_to_str(RX_EYEMON_VSTEP_WA_ENCODE(volt, lane), vstep_str, U32_TO_STR_SIZE_MAX);
 		if (ret) {
 			pr_err("Failed to covert vstep %d to string\n", volt);
@@ -329,7 +328,7 @@ int eom_scan(int peer, int lane, int timing, int volt, int target_count)
 	__u8 volt_dir_shift = EOM_DIRECTION_SHIFT;
 	__u8 vstep_mask = EOM_STEP_MASK;
 
-	if (need_vstep_wa) {
+	if (vstep_wa_fd >= 0) {
 		volt_dir_shift = EOM_DIRECTION_SHIFT_EXT;
 		vstep_mask = EOM_STEP_MASK_EXT;
 	}
@@ -918,7 +917,6 @@ skip_io_prepare:
 	    data->local_peer == LOCAL) {
 		/* Override voltage_max_steps */
 		data->voltage_max_steps = 127;
-		need_vstep_wa = true;
 
 		vstep_wa_fd = open(vstep_wa_path, O_WRONLY);
 		if (vstep_wa_fd < 0) {
