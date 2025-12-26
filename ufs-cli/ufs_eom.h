@@ -60,6 +60,7 @@ struct EOMData {
 	float slt_eye_height[2];		/* Eye Height (mV) for each lane */
 	float slt_eye_width_threshold[2];	/* Eye Width (UI) threshold for each lane */
 	float slt_eye_height_threshold[2];	/* Eye Height (mV) threshold for each lane */
+	bool use_extended_voltage;
 
 	struct eom_result *er;
 };

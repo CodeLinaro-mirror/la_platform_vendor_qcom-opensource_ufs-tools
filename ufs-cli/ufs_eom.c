@@ -328,7 +328,7 @@ int eom_scan(int peer, int lane, int timing, int volt, int target_count)
 	__u8 volt_dir_shift = EOM_DIRECTION_SHIFT;
 	__u8 vstep_mask = EOM_STEP_MASK;
 
-	if (vstep_wa_fd >= 0) {
+	if (data->use_extended_voltage) {
 		volt_dir_shift = EOM_DIRECTION_SHIFT_EXT;
 		vstep_mask = EOM_STEP_MASK_EXT;
 	}
@@ -777,6 +777,8 @@ int main(int argc, char *argv[])
 		pr_err("EOM is not supported\n");
 		ret = ERROR;
 		goto close_bsg;
+	} else if (eom_cap & EOM_CAP_EXTENDED_VOLTAGE) {
+		data->use_extended_voltage = true;
 	}
 
 	/* Get PA_RxGear */
@@ -917,6 +919,7 @@ skip_io_prepare:
 	    data->local_peer == LOCAL) {
 		/* Override voltage_max_steps */
 		data->voltage_max_steps = 127;
+		data->use_extended_voltage = true;
 
 		vstep_wa_fd = open(vstep_wa_path, O_WRONLY);
 		if (vstep_wa_fd < 0) {
