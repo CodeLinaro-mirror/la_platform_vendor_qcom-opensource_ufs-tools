@@ -9,10 +9,12 @@
 #include "uic.h"
 
 /* Eye width and height related macros */
-#define EOM_WIDTH_INITIAL_LEFT_TIMING_STEP	-9
-#define EOM_WIDTH_INITIAL_RIGHT_TIMING_STEP	6
-#define EOM_HEIGHT_INITIAL_BOTTOM_VOLT_STEP	-57
-#define EOM_HEIGHT_INITIAL_TOP_VOLT_STEP	57
+#define EOM_WIDTH_INITIAL_LEFT_TIMING_STEP		-9
+#define EOM_WIDTH_INITIAL_RIGHT_TIMING_STEP		6
+#define EOM_HEIGHT_INITIAL_BOTTOM_VOLT_STEP		-57
+#define EOM_HEIGHT_INITIAL_TOP_VOLT_STEP		57
+#define EOM_HEIGHT_INITIAL_BOTTOM_VOLT_STEP_EXTENDED	-99
+#define EOM_HEIGHT_INITIAL_TOP_VOLT_STEP_EXTENDED	99
 #define UFS_EYEMON_HEIGHT_ADJUST(steps)		((steps) + ((((steps) - 1) / 8) * 4))
 
 static int eom_slt_find_left(int is_peer, int lane, int target_count, int *left_timing)
@@ -210,7 +212,9 @@ static int eom_slt_find_bottom(int is_peer, int lane, int target_count, int timi
 		printf("Finding bottom eye boundary for lane %d at timing %d...\n",
 		       lane, timing_center);
 
-	voltage = EOM_HEIGHT_INITIAL_BOTTOM_VOLT_STEP;
+	voltage = (data->use_extended_voltage) ?
+		   EOM_HEIGHT_INITIAL_BOTTOM_VOLT_STEP_EXTENDED :
+		   EOM_HEIGHT_INITIAL_BOTTOM_VOLT_STEP;
 
 	/* Check if initial voltage step exceeds voltage_max_steps boundary */
 	if (voltage < -data->voltage_max_steps) {
@@ -309,7 +313,9 @@ static int eom_slt_find_top(int is_peer, int lane, int target_count, int timing_
 	if (verbose)
 		printf("Finding top eye boundary for lane %d at timing %d...\n", lane, timing_center);
 
-	voltage = EOM_HEIGHT_INITIAL_TOP_VOLT_STEP;
+	voltage = (data->use_extended_voltage) ?
+		   EOM_HEIGHT_INITIAL_TOP_VOLT_STEP_EXTENDED :
+		   EOM_HEIGHT_INITIAL_TOP_VOLT_STEP;
 
 	/* Check if initial voltage step exceeds voltage_max_steps boundary */
 	if (voltage > data->voltage_max_steps) {
@@ -408,7 +414,7 @@ static int __eom_scan_slt(int is_peer, int lane, int target_count)
 	int left_timing = 0, right_timing = 0;
 	int top_voltage = 0, bottom_voltage = 0;
 	int timing_center = 0;
-	int eye_width_steps = 0, eye_height_steps= 0;
+	int eye_width_steps = 0, eye_height_steps = 0;
 	int ret;
 
 	if (verbose)
@@ -449,9 +455,11 @@ static int __eom_scan_slt(int is_peer, int lane, int target_count)
 
 	/* Set eye width threshold based on UFS gear */
 	if (data->gear == UFS_HS_G4)
-		eye_width_threshold = EOM_T_EYE_HS_G4_RX_V5;
-	else if (data->gear == UFS_HS_MAX)
-		eye_width_threshold = EOM_T_EYE_HS_G5_RX_V5;
+		eye_width_threshold = (data->unipro_ver >= UFS_UNIPRO_VER_3) ?
+				      EOM_T_EYE_HS_G4_RX_V6 : EOM_T_EYE_HS_G4_RX_V5;
+	else if (data->gear == UFS_HS_G5)
+		eye_width_threshold = (data->unipro_ver >= UFS_UNIPRO_VER_3) ?
+				      EOM_T_EYE_HS_G5_RX_V6 : EOM_T_EYE_HS_G5_RX_V5;
 
 	/* Save eye width information to EOMData structure */
 	data->slt_eye_width[lane] = eye_width;
@@ -503,9 +511,11 @@ static int __eom_scan_slt(int is_peer, int lane, int target_count)
 
 	/* Set eye height threshold based on UFS gear */
 	if (data->gear == UFS_HS_G4)
-		eye_height_threshold = EOM_V_DIF_AC_HS_G4_RX_V5;
-	else if (data->gear == UFS_HS_MAX)
-		eye_height_threshold = EOM_V_DIF_AC_HS_G5_RX_V5;
+		eye_height_threshold = (data->unipro_ver >= UFS_UNIPRO_VER_3) ?
+				       EOM_V_DIF_AC_HS_G4_RX_V6 : EOM_V_DIF_AC_HS_G4_RX_V5;
+	else if (data->gear == UFS_HS_G5)
+		eye_height_threshold = (data->unipro_ver >= UFS_UNIPRO_VER_3) ?
+				       EOM_V_DIF_AC_HS_G5_RX_V6 : EOM_V_DIF_AC_HS_G5_RX_V5;
 
 	/* Save eye height information to EOMData structure */
 	data->slt_eye_height[lane] = eye_height;

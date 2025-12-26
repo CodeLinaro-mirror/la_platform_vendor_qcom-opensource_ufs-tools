@@ -57,6 +57,7 @@
 
 /* Unipro Attributes */
 #define PA_LOCALVERINFO		0x15A9
+#define PA_REMOTEVERINFO	0x15A0
 
 #define PA_HS_MODE_A		1
 #define PA_HS_MODE_B		2
@@ -96,6 +97,7 @@ enum ufs_hs_gear {
 	UFS_HS_G2,			/* HS Gear 2 */
 	UFS_HS_G3,			/* HS Gear 3 */
 	UFS_HS_G4,			/* HS Gear 4 */
+	UFS_HS_G5,			/* HS Gear 5 */
 	UFS_HS_MAX			/* HS Gear MAX */
 };
 

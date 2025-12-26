@@ -753,7 +753,7 @@ int main(int argc, char *argv[])
 	char tmp_file[1024], output_file[1024], eom_file_name[256], lane_str[8];
 	size_t eom_result_size, len;
 	int t, v, l, n, eom_cap, cur_gear, cur_rate, ret;
-	int local_verinfo, unipro_ver;
+	int unipro_verinfo, unipro_ver;
 
 	init_eom_operation();
 
@@ -904,16 +904,17 @@ skip_io_prepare:
 	}
 
 	/* Get Unipro version */
-	local_verinfo = uic_get(bsg_fd,
-				UIC_ARG_MIB_SEL(PA_LOCALVERINFO, SELECT_RX(0)),
+	unipro_verinfo = uic_get(bsg_fd,
+				UIC_ARG_MIB_SEL(data->local_peer ? PA_REMOTEVERINFO : PA_LOCALVERINFO, SELECT_RX(0)),
 				data->local_peer);
-	if (local_verinfo < 0) {
-		pr_err("Failed to get PA_LOCALVERINFO\n");
+	if (unipro_verinfo < 0) {
+		pr_err("Failed to get %s\n", data->local_peer ? "PA_REMOTEVERINFO" : "PA_LOCALVERINFO");
 		ret = ERROR;
 		goto out;
 	}
 
-	unipro_ver = local_verinfo & UFS_UNIPRO_VER_MASK;
+	unipro_ver = unipro_verinfo & UFS_UNIPRO_VER_MASK;
+	data->unipro_ver = unipro_ver;
 	if (unipro_ver >= UFS_UNIPRO_VER_3 &&
 	    !(eom_cap & EOM_CAP_EXTENDED_VOLTAGE) &&
 	    data->local_peer == LOCAL) {
@@ -962,11 +963,15 @@ skip_io_prepare:
 	printf("Start EOM Scan...\n");
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);
 	/* Main loop starts here */
-	if (slt)
+	if (slt && data->gear <= UFS_HS_G5) {
 		ret = eom_scan_slt(data, lane, target_test_count);
-	else
+	} else if (slt && data->gear > UFS_HS_G5) {
+		pr_err("EOM SLT not supported for HS-G%d\n", data->gear);
+		goto out;
+	} else {
 		ret = eom_scan_range(data, lane, timing_left, timing_right,
 				     voltage_low, voltage_high, target_test_count);
+	}
 	if (ret)
 		goto out;
 

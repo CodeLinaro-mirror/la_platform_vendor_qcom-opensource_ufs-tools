@@ -22,10 +22,14 @@
 #define EOM_TEMP_DATA_MEM_ALIGN_SIZE	4096
 #define EOM_SUPPORTED_MIN_GEAR		5
 #define EOM_TIMING_VOLTAGE_INIT		0xFF
-#define EOM_T_EYE_HS_G5_RX_V5		0.3		/* Per M-PHY SPEC V5.0, minimum eye width is 0.3UI for Gear-5 */
 #define EOM_T_EYE_HS_G4_RX_V5		0.48		/* Per M-PHY SPEC V5.0, minimum eye width is 0.48UI for Gear-4 */
-#define EOM_V_DIF_AC_HS_G5_RX_V5	60		/* Per M-PHY SPEC V5.0, minimum eye height is 60mV for Gear-5 */
+#define EOM_T_EYE_HS_G5_RX_V5		0.3		/* Per M-PHY SPEC V5.0, minimum eye width is 0.3UI for Gear-5 */
 #define EOM_V_DIF_AC_HS_G4_RX_V5	80		/* Per M-PHY SPEC V5.0, minimum eye height is 80mV for Gear-4 */
+#define EOM_V_DIF_AC_HS_G5_RX_V5	60		/* Per M-PHY SPEC V5.0, minimum eye height is 60mV for Gear-5 */
+#define EOM_T_EYE_HS_G4_RX_V6		0.48		/* Per M-PHY SPEC V6.0, minimum eye width is 0.48UI for Gear-4 */
+#define EOM_T_EYE_HS_G5_RX_V6		0.45		/* Per M-PHY SPEC V6.0, minimum eye width is 0.45UI for Gear-5 */
+#define EOM_V_DIF_AC_HS_G4_RX_V6	80		/* Per M-PHY SPEC V6.0, minimum eye height is 80mV for Gear-4 */
+#define EOM_V_DIF_AC_HS_G5_RX_V6	120		/* Per M-PHY SPEC V6.0, minimum eye height is 120mV for Gear-5 */
 
 #define EOM_CAP_EXTENDED_VOLTAGE	(1 << 4)
 
@@ -61,6 +65,7 @@ struct EOMData {
 	float slt_eye_width_threshold[2];	/* Eye Width (UI) threshold for each lane */
 	float slt_eye_height_threshold[2];	/* Eye Height (mV) threshold for each lane */
 	bool use_extended_voltage;
+	int unipro_ver;
 
 	struct eom_result *er;
 };
