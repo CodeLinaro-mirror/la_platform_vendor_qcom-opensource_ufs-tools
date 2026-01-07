@@ -477,12 +477,13 @@ static int generate_eom_report(char *eom_file, struct EOMData *data)
 				l, data->slt_eye_width[l],
 				data->slt_eye_width_steps[l],
 				(data->slt_eye_width[l] < data->slt_eye_width_threshold[l]) ? "Fail" : "Pass");
-
-			fprintf(file, "UFS EOM SLT (PassEyeHeight %.2fmV): Lane %d Eye Height %.2fmV (%d steps) - %s\n",
-				data->slt_eye_height_threshold[l],
-				l, data->slt_eye_height[l],
-				data->slt_eye_height_steps[l],
-				(data->slt_eye_height[l] < data->slt_eye_height_threshold[l]) ? "Fail" : "Pass");
+			if (data->unipro_ver < UFS_UNIPRO_VER_3) {
+				fprintf(file, "UFS EOM SLT (PassEyeHeight %.2fmV): Lane %d Eye Height %.2fmV (%d steps) - %s\n",
+					data->slt_eye_height_threshold[l],
+					l, data->slt_eye_height[l],
+					data->slt_eye_height_steps[l],
+					(data->slt_eye_height[l] < data->slt_eye_height_threshold[l]) ? "Fail" : "Pass");
+			}
 		}
 		fprintf(file, "\n");
 	}

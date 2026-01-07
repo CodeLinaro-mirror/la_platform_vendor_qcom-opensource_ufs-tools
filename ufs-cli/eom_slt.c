@@ -475,6 +475,9 @@ static int __eom_scan_slt(int is_peer, int lane, int target_count)
 	printf("UFS EOM SLT (PassEyeWidth %.2fUI): Lane %d Eye Width %.2fUI (%d steps) - %s\n",
 	       eye_width_threshold, lane, eye_width, eye_width_steps, eye_width_pass ? "Pass" : "Fail");
 
+	if (data->unipro_ver >= UFS_UNIPRO_VER_3)
+		goto out;
+
 	/* Find bottom eye boundary */
 	ret = eom_slt_find_bottom(is_peer, lane, target_count, timing_center, &bottom_voltage);
 	if (ret) {
@@ -531,6 +534,7 @@ static int __eom_scan_slt(int is_peer, int lane, int target_count)
 	printf("UFS EOM SLT (PassEyeHeight %.2fmV): Lane %d Eye Height %.2fmV (%d steps) - %s\n",
 	       eye_height_threshold, lane, eye_height, eye_height_steps, eye_height_pass ? "Pass" : "Fail");
 
+out:
 	return SUCCESS;
 }
 
