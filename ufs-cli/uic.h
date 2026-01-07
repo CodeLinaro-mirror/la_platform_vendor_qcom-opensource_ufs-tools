@@ -57,7 +57,6 @@
 
 /* Unipro Attributes */
 #define PA_LOCALVERINFO		0x15A9
-#define PA_REMOTEVERINFO	0x15A0
 
 #define PA_HS_MODE_A		1
 #define PA_HS_MODE_B		2

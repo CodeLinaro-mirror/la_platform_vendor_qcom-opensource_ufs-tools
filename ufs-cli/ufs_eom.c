@@ -905,10 +905,10 @@ skip_io_prepare:
 
 	/* Get Unipro version */
 	unipro_verinfo = uic_get(bsg_fd,
-				UIC_ARG_MIB_SEL(data->local_peer ? PA_REMOTEVERINFO : PA_LOCALVERINFO, SELECT_RX(0)),
+				UIC_ARG_MIB_SEL(PA_LOCALVERINFO, SELECT_RX(0)),
 				data->local_peer);
 	if (unipro_verinfo < 0) {
-		pr_err("Failed to get %s\n", data->local_peer ? "PA_REMOTEVERINFO" : "PA_LOCALVERINFO");
+		pr_err("Failed to get PA_LOCALVERINFO\n");
 		ret = ERROR;
 		goto out;
 	}
