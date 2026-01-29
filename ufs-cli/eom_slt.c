@@ -465,6 +465,7 @@ static int __eom_scan_slt(int is_peer, int lane, int target_count)
 	data->slt_eye_width[lane] = eye_width;
 	data->slt_eye_width_steps[lane] = eye_width_steps;
 	data->slt_eye_width_threshold[lane] = eye_width_threshold;
+	data->slt_eye_center[lane] = timing_center;
 
 	/* Check eye width against the calculated threshold */
 	if (eye_width <= eye_width_threshold)
@@ -472,8 +473,8 @@ static int __eom_scan_slt(int is_peer, int lane, int target_count)
 	else
 		eye_width_pass = true;
 
-	printf("UFS EOM SLT (PassEyeWidth %.2fUI): Lane %d Eye Width %.2fUI (%d steps) - %s\n",
-	       eye_width_threshold, lane, eye_width, eye_width_steps, eye_width_pass ? "Pass" : "Fail");
+	printf("UFS EOM SLT (PassEyeWidth %.2fUI): Lane %d Eye Width %.2fUI (%d steps) - %s, Eye Center (timing step : %d)\n",
+	       eye_width_threshold, lane, eye_width, eye_width_steps, eye_width_pass ? "Pass" : "Fail", timing_center);
 
 	if (data->unipro_ver >= UFS_UNIPRO_VER_3)
 		goto out;

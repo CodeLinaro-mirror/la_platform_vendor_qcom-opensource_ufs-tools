@@ -472,11 +472,12 @@ static int generate_eom_report(char *eom_file, struct EOMData *data)
 	/* Add SLT mode eye width and height information */
 	if (slt) {
 		for (l = lane, n = data->num_lanes; n > 0; n--, l++) {
-			fprintf(file, "UFS EOM SLT (PassEyeWidth %.2fUI): Lane %d Eye Width %.2fUI (%d steps) - %s\n",
+			fprintf(file, "UFS EOM SLT (PassEyeWidth %.2fUI): Lane %d Eye Width %.2fUI (%d steps) - %s, Eye Center (timing step : %d)\n",
 				data->slt_eye_width_threshold[l],
 				l, data->slt_eye_width[l],
 				data->slt_eye_width_steps[l],
-				(data->slt_eye_width[l] < data->slt_eye_width_threshold[l]) ? "Fail" : "Pass");
+				(data->slt_eye_width[l] < data->slt_eye_width_threshold[l]) ? "Fail" : "Pass",
+				data->slt_eye_center[l]);
 			if (data->unipro_ver < UFS_UNIPRO_VER_3) {
 				fprintf(file, "UFS EOM SLT (PassEyeHeight %.2fmV): Lane %d Eye Height %.2fmV (%d steps) - %s\n",
 					data->slt_eye_height_threshold[l],

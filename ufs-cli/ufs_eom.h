@@ -60,6 +60,7 @@ struct EOMData {
 	/* SLT mode eye width and height information */
 	int slt_eye_width_steps[2];		/* Eye Width steps for each lane */
 	int slt_eye_height_steps[2];		/* Eye Height steps for each lane */
+	int slt_eye_center[2];			/* Eye Center Timing step for each lane */
 	float slt_eye_width[2];			/* Eye Width (UI) for each lane */
 	float slt_eye_height[2];		/* Eye Height (mV) for each lane */
 	float slt_eye_width_threshold[2];	/* Eye Width (UI) threshold for each lane */
