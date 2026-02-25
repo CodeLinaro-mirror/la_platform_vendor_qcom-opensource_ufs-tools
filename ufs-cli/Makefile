@@ -1,32 +1,41 @@
+OUT_DIR := ./out
+
 # Common objects shared by both executables
-COMMON_OBJS := uic.o query.o ufs_bsg.o common.o query_trans.o
+COMMON_OBJS := $(OUT_DIR)/uic.o $(OUT_DIR)/query.o $(OUT_DIR)/ufs_bsg.o $(OUT_DIR)/common.o $(OUT_DIR)/query_trans.o
 
 # Unique objects for each executable
-LSUFS_UNIQUE_OBJS := shell.o lsufs.o
-EOM_UNIQUE_OBJS := ufs_eom.o
+LSUFS_UNIQUE_OBJS := $(OUT_DIR)/shell.o $(OUT_DIR)/lsufs.o
+EOM_UNIQUE_OBJS := $(OUT_DIR)/ufs_eom.o
 
 # Combined object lists
 LSUFS_OBJS := $(LSUFS_UNIQUE_OBJS) $(COMMON_OBJS)
 EOM_OBJS := $(EOM_UNIQUE_OBJS) $(COMMON_OBJS)
 
 CC := gcc
-CFLAGS := -o0 -g -I. -D_GNU_SOURCE
+CFLAGS := -O0 -g -I. -I./ufs-eom -D_GNU_SOURCE
 LDFLAGS :=
 RM := rm -f
 
 .PHONY: clean all
 
-all: lsufs ufseom
+all: $(OUT_DIR)/lsufs $(OUT_DIR)/ufseom
 
-lsufs: $(LSUFS_OBJS)
+$(OUT_DIR):
+	mkdir -p $@
+
+$(OUT_DIR)/lsufs: $(LSUFS_OBJS) | $(OUT_DIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-ufseom: $(EOM_OBJS)
+$(OUT_DIR)/ufseom: $(EOM_OBJS) | $(OUT_DIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(OUT_DIR)/%.o: %.c | $(OUT_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(OUT_DIR)/%.o: ufs-eom/%.c | $(OUT_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
 	@echo -n Cleaning...
-	@$(RM) ./*.o
-	@$(RM) lsufs
-	@$(RM) ufseom
+	@$(RM) -r $(OUT_DIR)
 	@echo Done
