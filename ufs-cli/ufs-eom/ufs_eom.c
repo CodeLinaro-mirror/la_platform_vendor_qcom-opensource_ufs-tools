@@ -11,6 +11,7 @@
 #include <malloc.h>
 #include <sys/stat.h>
 #include "ufs_eom_slt.h"
+#include "ufs_eom_qcom.h"
 #include "common.h"
 #include "query.h"
 #include "uic.h"
@@ -589,6 +590,12 @@ static int ufs_eom_apply_steps(struct ufs_eom_context *ctx, __u32 tstep,
 		return ret;
 	}
 
+	if (peer == LOCAL) {
+		ret = ufs_eom_qcom_set_vstep(vstep, lane);
+		if (ret != INVAL)
+			return ret;
+	}
+
 	ret = uic_set(ctx->bsg_fd,
 		      UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_STEPS, SELECT_RX(lane)),
 		      ATTR_SET_NOR, vstep, ctx->cfg.local_peer);
@@ -1043,6 +1050,14 @@ int main(int argc, char *argv[])
 	if (ret)
 		goto cleanup;
 
+	if (ctx->cfg.local_peer == LOCAL) {
+		ret = ufs_eom_qcom_init(ctx);
+		if (ret) {
+			pr_err("QCOM EOM init failed!\n");
+			goto cleanup;
+		}
+	}
+
 	ret = ufs_eom_validate_range(ctx);
 	if (ret)
 		goto cleanup;
@@ -1080,6 +1095,9 @@ cleanup:
 
 	close(ctx->data_fd);
 	close(ctx->bsg_fd);
+
+	if (ctx->cfg.local_peer == LOCAL)
+		ufs_eom_qcom_exit(ctx);
 
 	free(ctx);
 

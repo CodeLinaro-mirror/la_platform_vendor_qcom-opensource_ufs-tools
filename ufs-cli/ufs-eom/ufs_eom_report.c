@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "ufs_eom_qcom.h"
 #include "common.h"
 #include "query.h"
 #include "uic.h"
@@ -101,6 +102,12 @@ int ufs_eom_generate_reports(struct ufs_eom_context *ctx,
 	ret = ufs_eom_write_report(output_file, ctx, mname, pname, pver);
 	if (ret) {
 		pr_err("Failed to write EOM report\n");
+		return ret;
+	}
+
+	ret = ufs_eom_qcom_generate_json_report(ctx, output_file, mname, pname, pver);
+	if (ret) {
+		pr_err("Failed to write JSON report\n");
 		return ret;
 	}
 

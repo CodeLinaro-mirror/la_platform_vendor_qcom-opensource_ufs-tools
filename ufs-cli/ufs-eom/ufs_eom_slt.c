@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "ufs_eom_slt.h"
+#include "ufs_eom_qcom.h"
 #include "common.h"
 #include "uic.h"
 #include "ufs_eom.h"
@@ -417,6 +418,10 @@ static int ufs_eom_slt_measure_eye_height(struct ufs_eom_context *ctx, int lane,
 	}
 
 	eye_height_steps = top_voltage - bottom_voltage + 1;
+
+	if (ctx->cfg.local_peer == LOCAL)
+		eye_height_steps = EOM_HEIGHT_ADJUST(top_voltage) +
+				   EOM_HEIGHT_ADJUST(-bottom_voltage);
 
 	/* Convert steps to mV */
 	voltage_step_size = (float)caps->voltage_max_offset * 10.0f /
