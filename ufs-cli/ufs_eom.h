@@ -33,9 +33,6 @@
 
 #define EOM_CAP_EXTENDED_VOLTAGE	(1 << 4)
 
-#define RX_EYEMON_VSTEP_WA_LANE_SHIFT	16
-#define RX_EYEMON_VSTEP_WA_ENCODE(v, l)	(v | (l << RX_EYEMON_VSTEP_WA_LANE_SHIFT))
-
 #define STRING_BUFFER_SIZE		0x24
 
 /* EOM Result Structure */
@@ -57,14 +54,6 @@ struct EOMData {
 	int local_peer;
 	int gear;
 	int rate;
-	/* SLT mode eye width and height information */
-	int slt_eye_width_steps[2];		/* Eye Width steps for each lane */
-	int slt_eye_height_steps[2];		/* Eye Height steps for each lane */
-	int slt_eye_center[2];			/* Eye Center Timing step for each lane */
-	float slt_eye_width[2];			/* Eye Width (UI) for each lane */
-	float slt_eye_height[2];		/* Eye Height (mV) for each lane */
-	float slt_eye_width_threshold[2];	/* Eye Width (UI) threshold for each lane */
-	float slt_eye_height_threshold[2];	/* Eye Height (mV) threshold for each lane */
 	bool use_extended_voltage;
 	int unipro_ver;
 
