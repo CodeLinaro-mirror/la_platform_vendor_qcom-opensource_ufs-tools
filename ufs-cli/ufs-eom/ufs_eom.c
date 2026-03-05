@@ -3,176 +3,327 @@
 
 #include <fcntl.h>
 #include <getopt.h>
-#include <limits.h>
-#include <linux/types.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <stddef.h>
+#include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <malloc.h>
-#include <errno.h>
-#include <time.h>
+#include <sys/stat.h>
 #include "common.h"
 #include "query.h"
-#include "ufs_eom.h"
 #include "uic.h"
+#include "ufs_eom.h"
 
-struct EOMData eom_data;
+/* Temporary file written during I/O stress runs */
+static const char *EOM_TMP_FILENAME = "ufseom_tmp_data";
 
-static char output_path[DEVICE_PATH_NAME_SIZE_MAX];
-static char device_path[DEVICE_PATH_NAME_SIZE_MAX];
-const static char *ufseom_tmp_file = "ufseom_tmp_data";
-static char *tmp_buf;
+/* Global aligned I/O buffer used during EOM stress runs */
+static char *ufs_eom_tmp_buf;
 
-/* Global EOM control parameters */
-static int lane;
-static int voltage_low;
-static int voltage_high;
-static int timing_left;
-static int timing_right;
-static int target_test_count;
-static int eom_result_count;
-static int tmp_fd, bsg_fd;
-static bool do_io;
-bool verbose;
+static const char *ufseom_help =
+	"\nufseom cli:\n\n"
+	"       [-L|--lane <lane>] [--voltage-low <v>] [--voltage-high <v>]\n"
+	"       [--timing-left <t>] [--timing-right <t>]\n"
+	"       [-t|--target <count>] [-o|--output <path>] [-d|--device <dev>]\n"
+	"       [-V|--verbose]\n\n"
+	"Options:\n"
+	"  -h               Show this help message\n"
+	"  --version        Print ufseom version\n"
+	"  -p, --peer       Measure peer (UFS device) Rx\n"
+	"  -l, --local      Measure local (UFS host) Rx\n"
+	"  -D, --data       Stress the link with random I/O while scanning\n"
+	"  -L, --lane       Lane number (0 or 1); omit to scan all lanes\n"
+	"  --voltage-low    Lower voltage bound (default: -voltage_max_steps)\n"
+	"  --voltage-high   Upper voltage bound (default: +voltage_max_steps)\n"
+	"  --timing-left    Left timing bound (default: -timing_max_steps)\n"
+	"  --timing-right   Right timing bound (default: +timing_max_steps)\n"
+	"  -t, --target     Target test count per point (default: 0x5D)\n"
+	"  -o, --output     Directory for output files (must end with '/')\n"
+	"  -d, --device     Path to UFS BSG device (e.g. /dev/ufs-bsg0)\n"
+	"  -V, --verbose    Print detailed scan progress\n\n"
+	"Examples:\n"
+	"  # Scan local Rx with I/O stress:\n"
+	"  ufseom -l -D -o /data/ -d /dev/ufs-bsg0\n\n"
+	"  # Scan peer Rx with I/O stress::\n"
+	"  ufseom -p -D -o /data/ -d /dev/ufs-bsg0\n\n"
+	"Note: disable UFS low-power features before running EOM:\n"
+	"  echo 0 > /sys/devices/<path>/*.ufshc/clkscale_enable\n"
+	"  echo 0 > /sys/devices/<path>/*.ufshc/clkgate_enable\n"
+	"  echo 0 > /sys/devices/<path>/*.ufshc/auto_hibern8\n"
+	"  echo on > /sys/bus/scsi/devices/*/power/control\n"
+	"Reboot the system after use.\n";
 
-const char *ufseom_help =
-	"\nufseom cli :\n\n"
-	"ufseom [-p | --peer | -l | --local] [-D | --data] [-L | --lane <lane no.>] [--voltage-low <low voltage value>] [--voltage-high <high voltage value>] [--timing-left <left timing value>] [--timing-right <right timing value>] [-T | --target <target test count>] [-o | --output <output>] [-d | --device <device>]\n\n"
-	"-h : help\n"
-	"--version : UFS EOM version\n"
-	"-p | --peer : peer\n"
-	"-l | --local : local\n"
-	"-D | --data : explicitly do I/O transfer with random data patterns to stress the link while EOM is running\n"
-	"-L | --lane : lane no. 0 or 1, collect EOM data for all connected lanes if not given\n"
-	"--voltage-low : collect EOM data from low voltage to high voltage, if it is not given, it defaults to -voltage_max_steps\n"
-	"--voltage-high : collect EOM data from low voltage to high voltage, if it is not given, it defaults to voltage_max_steps\n"
-	"--timing-left : collect EOM data from left timing to right timing, if it is not given, it defaults to -timing_max_steps\n"
-	"--timing-right : collect EOM data from left timing to right timing, if it is not given, it defaults to timing_max_steps\n"
-	"-t | --target : target test count\n"
-	"-o | --output : path to the folder where the EOM report is saved\n"
-	"-V | --verbose : enable detailed EOM information and logs\n"
-	"-d | --device : path to ufs-bsg device\n\n"
-	"Example:\n"
-	"  1. Collect EOM data for local Rx:\n"
-	"  ufseom -l -D -o /data/ -d /dev/ufs-bsg0\n"
-	"  2. Collect EOM data for peer Rx:\n"
-	"  ufseom -p -D -o /data/ -d /dev/ufs-bsg0\n"
-	"  3. Collect EOM data for local Rx with voltage 0 only:\n"
-	"  ufseom -l -D --voltage-low 0 --voltage-high 0 -o /data/ -d /dev/ufs-bsg0\n"
-	"  4. Collect EOM data for local Rx from voltage 0 to 8:\n"
-	"  ufseom -l -D --voltage-low 0 --voltage-high 8 -o /data/ -d /dev/ufs-bsg0\n"
-	"  5. Collect EOM data for local Rx for voltage from 0 to 8 and timing from -1 to 1:\n"
-	"  ufseom -l -D --voltage-low 0 --voltage-high 8 --timing-left -1 --timing-right 1 -o /data/ -d /dev/ufs-bsg0\n"
-	"Note that to get accurate EOM data, user should disable UFS driver low power mode features,\n"
-	"such as Clock Scaling, Clock Gating, Suspend/Resume and Auto Hibernate. For example:\n"
-	"$ echo 0 > /sys/devices/<path to platform devices>/*.ufshc/clkscale_enable\n"
-	"$ echo 0 > /sys/devices/<path to platform devices>/*.ufshc/clkgate_enable\n"
-	"$ echo 0 > /sys/devices/<path to platform devices>/*.ufshc/auto_hibern8\n\n"
-	"In addition, ufseom changes UFS Host and/or UFS device UIC layer execution environments,\n"
-	"although UFS EOM is not supposed to disturb normal I/O traffics, it is recommanded to\n"
-	"reboot the system after use ufseom.\n";
+static const char *short_opts = "plDL:t:o:d:V";
 
-static char *ufseom_short_options = "plDL:t:o:d:V";
+enum long_opt_ids {
+	OPT_VOLTAGE_LOW = 1,
+	OPT_VOLTAGE_HIGH = 2,
+	OPT_TIMING_LEFT = 3,
+	OPT_TIMING_RIGHT = 4,
+};
 
-static struct option ufseom_long_options[] = {
-	{"peer", no_argument, NULL, 'p'}, /* UFS device */
-	{"local", no_argument, NULL, 'l'}, /* UFS host */
-	{"data", no_argument, NULL, 'D'}, /* Do I/Os */
-	{"lane", required_argument, NULL, 'L'}, /* Lane */
-	{"target", required_argument, NULL, 't'}, /* Target test count */
-	{"output", required_argument, NULL, 'o'}, /* EOM result output path */
-	{"device", required_argument, NULL, 'd'}, /* UFS BSG device path. For example: /dev/ufs-bsg0 */
-	{"verbose", no_argument, NULL, 'V'}, /* Enable detailed EOM information and logs */
-	{"voltage-low", required_argument, NULL, 1}, /* Voltage low */
-	{"voltage-high", required_argument, NULL, 2}, /* Voltage high */
-	{"timing-left", required_argument, NULL, 3}, /* Timing left*/
-	{"timing-right", required_argument, NULL, 4}, /* Timing right */
+static struct option long_opts[] = {
+	{"peer", no_argument, NULL, 'p'},
+	{"local", no_argument, NULL, 'l'},
+	{"data", no_argument, NULL, 'D'},
+	{"lane", required_argument, NULL, 'L'},
+	{"target", required_argument, NULL, 't'},
+	{"output", required_argument, NULL, 'o'},
+	{"device", required_argument, NULL, 'd'},
+	{"verbose", no_argument, NULL, 'V'},
+	{"voltage-low", required_argument, NULL, OPT_VOLTAGE_LOW},
+	{"voltage-high", required_argument, NULL, OPT_VOLTAGE_HIGH},
+	{"timing-left", required_argument, NULL, OPT_TIMING_LEFT},
+	{"timing-right", required_argument, NULL, OPT_TIMING_RIGHT},
 	{NULL, 0, NULL, 0}
 };
 
-static uint64_t fast_rand64(uint64_t *seed)
-{
-	uint64_t val = *seed;
-
-	val = (370003845LL * val + 3037000493LL);
-	*seed = val & 0x1F;
-
-	return val & 0x7FFFFFFFFFFFFFFFLL;
-}
-
-static void populate_data_pattern(char *buffer)
-{
-	unsigned int i, val;
-	unsigned int size = EOM_TEMP_DATA_SIZE / sizeof(int);
-	uint64_t seed = rand();
-	int *buf = (int *)buffer;
-
-	for (i = 0; i < size; i++) {
-		val = (fast_rand64(&seed) & 0xFFFFFFFF);
-		*buf = val;
-		buf++;
-	}
-}
-
-static int parse_string_desc(__u8 *buf, char *string)
-{
-	int len, i, j;
-	size_t length;
-
-	if (buf == NULL || string == NULL)
-		return ERROR;
-
-	/* bLength */
-	len = buf[0];
-
-	for (i = 2, j = 0; i < len; i++) {
-		if (buf[i])
-			string[j++] = (char)buf[i];
-	}
-
-	length = strlcat(string, "\0", STRING_BUFFER_SIZE);
-
-	if (length >= STRING_BUFFER_SIZE) {
-		pr_err("Truncation occurred. Need %zu bytes but string is %zu bytes.\n",
-								length, STRING_BUFFER_SIZE);
-		return ERROR;
-	}
-
-	return SUCCESS;
-}
-
-static int get_voltage_timing_value_from_cli(int *val)
+/**
+ * ufs_eom_parse_int_arg() - Parse the current optarg as a signed integer.
+ * @out: Pointer to store the parsed integer value.
+ *
+ * Return: SUCCESS on success, ERROR if the argument is not a valid integer.
+ */
+static int ufs_eom_parse_int_arg(int *out)
 {
 	char *end;
 
-	if (strstr(optarg, "0x") || strstr(optarg, "0X")) {
-		*val = (int)strtol(optarg, &end, 0);
-		if (*end != '\0')
-			return ERROR;
-	} else {
-		*val = atoi(optarg);
+	*out = (int)strtol(optarg, &end, 0);
+	if (*end != '\0') {
+		pr_err("Invalid numeric argument: '%s'\n", optarg);
+		return ERROR;
 	}
 
-	if (*val == 0 && strncmp(optarg, "0", 1))
+	if (*out == 0 && optarg[0] != '0' && optarg[0] != '-') {
+		pr_err("Invalid numeric argument: '%s'\n", optarg);
 		return ERROR;
+	}
 
 	return SUCCESS;
 }
 
-int get_device_info(char *mname, char *pname, char *pversion)
+/**
+ * ufs_eom_parse_lane_arg() - Parse and validate the lane number argument.
+ * @cfg: EOM configuration to update with the parsed lane number.
+ *
+ * Return: SUCCESS on success, ERROR if the lane number is invalid.
+ */
+static int ufs_eom_parse_lane_arg(struct ufs_eom_config *cfg)
 {
-	int mname_idx, pname_idx, pver_idx, ret;
+	int lane, ret;
+
+	ret = get_value_from_cli(&lane);
+	if (ret || lane < 0 || lane > 1) {
+		pr_err("Invalid lane number (must be 0 or 1)\n");
+		return ERROR;
+	}
+	cfg->start_lane = lane;
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_parse_target_count_arg() - Parse and validate the target test count
+ *                                    argument.
+ * @cfg: EOM configuration to update with the parsed target test count.
+ *
+ * Return: SUCCESS on success, ERROR if the value is out of range.
+ */
+static int ufs_eom_parse_target_count_arg(struct ufs_eom_config *cfg)
+{
+	int t, ret;
+
+	ret = get_value_from_cli(&t);
+	if (ret || t <= 0 || t > EOM_TARGET_TEST_COUNT_MAX) {
+		pr_err("Invalid target test count (must be 1..%d)\n",
+		       EOM_TARGET_TEST_COUNT_MAX);
+		return ERROR;
+	}
+
+	cfg->target_test_count = t;
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_check_output_path() - Validate the output directory path.
+ * @path: Output path string to validate.
+ *
+ * Return: SUCCESS on success, ERROR if the path is invalid.
+ */
+static int ufs_eom_check_output_path(const char *path)
+{
+	size_t len = strlen(path);
+	size_t i;
+
+	for (i = 0; i < len; i++) {
+		if (path[i] == ' ') {
+			pr_err("Output path must not contain spaces\n");
+			return ERROR;
+		}
+	}
+
+	if (path[len - 1] != '/') {
+		pr_err("Output path must end with '/'\n");
+		return ERROR;
+	}
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_parse_args() - Parse and validate all command-line arguments.
+ * @argc: Argument count passed to main().
+ * @argv: Argument vector passed to main().
+ * @cfg: EOM configuration structure to populate.
+ *
+ * Return: SUCCESS on success, ERROR on invalid or missing arguments.
+ */
+static int ufs_eom_parse_args(int argc, char *argv[], struct ufs_eom_config *cfg)
+{
+	int c, idx, ret = ERROR;
+
+	if (argc < 2) {
+		pr_err("Too few arguments. Try 'ufseom -h'.\n");
+		return ERROR;
+	}
+
+	if (!strcmp(argv[1], "--version")) {
+		printf("ufseom version %s\n", EOM_VERSION);
+		return ERROR;
+	}
+
+	if (!strcmp(argv[1], "-h")) {
+		printf("%s\n", ufseom_help);
+		return ERROR;
+	}
+
+	while ((c = getopt_long(argc, argv, short_opts, long_opts, &idx)) != -1) {
+		switch (c) {
+		case 'p':
+			cfg->local_peer = PEER;
+			ret = SUCCESS;
+			break;
+		case 'l':
+			cfg->local_peer = LOCAL;
+			ret = SUCCESS;
+			break;
+		case 'D':
+			cfg->generate_io = true;
+			ret = SUCCESS;
+			break;
+		case 'V':
+			cfg->verbose_logging = true;
+			ret = SUCCESS;
+			break;
+		case 'L':
+			ret = ufs_eom_parse_lane_arg(cfg);
+			break;
+		case 't':
+			ret = ufs_eom_parse_target_count_arg(cfg);
+			break;
+		case 'o':
+			ret = init_device_path(cfg->output_path);
+			break;
+		case 'd':
+			ret = init_device_path(cfg->device_path);
+			break;
+		case OPT_VOLTAGE_LOW:
+			ret = ufs_eom_parse_int_arg(&cfg->voltage_low);
+			break;
+		case OPT_VOLTAGE_HIGH:
+			ret = ufs_eom_parse_int_arg(&cfg->voltage_high);
+			break;
+		case OPT_TIMING_LEFT:
+			ret = ufs_eom_parse_int_arg(&cfg->timing_left);
+			break;
+		case OPT_TIMING_RIGHT:
+			ret = ufs_eom_parse_int_arg(&cfg->timing_right);
+			break;
+		default:
+			pr_err("Unknown option. Try 'ufseom -h'.\n");
+			return ERROR;
+		}
+
+		if (ret)
+			return ret;
+	}
+
+	/* Mandatory checks */
+	if (cfg->local_peer == INIT) {
+		pr_err("Must specify -l (local) or -p (peer)\n");
+		return ERROR;
+	}
+
+	if (cfg->device_path[0] == '\0') {
+		pr_err("Must specify -d <device>\n");
+		return ERROR;
+	}
+
+	if (cfg->output_path[0] == '\0') {
+		pr_err("Must specify -o <output path>\n");
+		return ERROR;
+	}
+
+	if (ufs_eom_check_output_path(cfg->output_path))
+		return ERROR;
+
+	if (cfg->target_test_count == INIT) {
+		cfg->target_test_count = EOM_TARGET_TEST_COUNT_DEFAULT;
+		pr_err("Target test count not specified; using default %d\n",
+		       cfg->target_test_count);
+	}
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_parse_string_desc() - Extract an ASCII string from a UFS string
+ *                               descriptor buffer.
+ * @buf: Descriptor buffer.
+ * @out: Output buffer to store the extracted string.
+ *
+ * Return: SUCCESS on success, ERROR if @buf or @out is NULL.
+ */
+static int ufs_eom_parse_string_desc(const __u8 *buf, char *out)
+{
+	int len, i, j;
+
+	if (!buf || !out)
+		return ERROR;
+
+	len = buf[0]; /* bLength field */
+	for (i = 2, j = 0; i < len; i++) {
+		if (buf[i])
+			out[j++] = (char)buf[i];
+	}
+
+	out[j] = '\0';
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_get_device_info() - Read manufacturer name, product name and
+ *                             product revision from UFS device descriptors.
+ * @bsg_fd: File descriptor for the UFS BSG device.
+ * @mname: Output buffer for the manufacturer name string.
+ * @pname: Output buffer for the product name string.
+ * @pversion: Output buffer for the product revision level string.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+int ufs_eom_get_device_info(int bsg_fd, char *mname, char *pname,
+			    char *pversion)
+{
 	__u8 desc_buf[DESCRIPTOR_BUFFER_SIZE] = {0};
-	char string_buf[STRING_BUFFER_SIZE];
+	char str_buf[STRING_BUFFER_SIZE];
+	int mname_idx, pname_idx, pver_idx, ret;
 	size_t len;
 
-	ret = query_read_descriptor(bsg_fd, DEVICE_DESCRIPTOR_IDN, 0, 0, desc_buf, DESCRIPTOR_BUFFER_SIZE);
+	ret = query_read_descriptor(bsg_fd, DEVICE_DESCRIPTOR_IDN, 0, 0,
+				    desc_buf, DESCRIPTOR_BUFFER_SIZE);
 	if (ret) {
 		pr_err("Failed to read Device Descriptor\n");
 		return ret;
@@ -182,230 +333,463 @@ int get_device_info(char *mname, char *pname, char *pversion)
 	pname_idx = desc_buf[PRODUCT_NAME_OFFSET];
 	pver_idx = desc_buf[PRODUCT_REVISION_LEVEL_OFFSET];
 
-	ret = query_read_descriptor(bsg_fd, STRING_DESCRIPTOR_IDN, mname_idx, 0, desc_buf, DESCRIPTOR_BUFFER_SIZE);
+	ret = query_read_descriptor(bsg_fd, STRING_DESCRIPTOR_IDN, mname_idx,
+				    0, desc_buf, DESCRIPTOR_BUFFER_SIZE);
 	if (ret) {
 		pr_err("Failed to read Manufacturer Name String Descriptor\n");
 		return ret;
 	}
-	memset(string_buf, 0, STRING_BUFFER_SIZE);
-	parse_string_desc(desc_buf, string_buf);
-	len = strlcpy(mname, string_buf, MANUFACTURER_NAME_STRING_DESC_SIZE);
+
+	memset(str_buf, 0, STRING_BUFFER_SIZE);
+	ufs_eom_parse_string_desc(desc_buf, str_buf);
+	len = strlcpy(mname, str_buf, MANUFACTURER_NAME_STRING_DESC_SIZE);
 	if (len >= MANUFACTURER_NAME_STRING_DESC_SIZE) {
 		pr_err("Truncation occurred. Need %zu bytes but mname is %zu bytes.\n",
-								len, MANUFACTURER_NAME_STRING_DESC_SIZE);
+		       len, MANUFACTURER_NAME_STRING_DESC_SIZE);
 		return ERROR;
 	}
 
-	ret = query_read_descriptor(bsg_fd, STRING_DESCRIPTOR_IDN, pname_idx, 0, desc_buf, DESCRIPTOR_BUFFER_SIZE);
+	ret = query_read_descriptor(bsg_fd, STRING_DESCRIPTOR_IDN, pname_idx,
+				    0, desc_buf, DESCRIPTOR_BUFFER_SIZE);
 	if (ret) {
 		pr_err("Failed to read Product Name String Descriptor\n");
 		return ret;
 	}
-	memset(string_buf, 0, STRING_BUFFER_SIZE);
-	parse_string_desc(desc_buf, string_buf);
-	len = strlcpy(pname, string_buf, PRODUCT_NAME_STRING_DESC_SIZE);
+
+	memset(str_buf, 0, STRING_BUFFER_SIZE);
+	ufs_eom_parse_string_desc(desc_buf, str_buf);
+	len = strlcpy(pname, str_buf, PRODUCT_NAME_STRING_DESC_SIZE);
 	if (len >= PRODUCT_NAME_STRING_DESC_SIZE) {
 		pr_err("Truncation occurred. Need %zu bytes but pname is %zu bytes.\n",
-								len, PRODUCT_NAME_STRING_DESC_SIZE);
+		       len, PRODUCT_NAME_STRING_DESC_SIZE);
 		return ERROR;
 	}
 
-	ret = query_read_descriptor(bsg_fd, STRING_DESCRIPTOR_IDN, pver_idx, 0, desc_buf, DESCRIPTOR_BUFFER_SIZE);
+	ret = query_read_descriptor(bsg_fd, STRING_DESCRIPTOR_IDN, pver_idx,
+				    0, desc_buf, DESCRIPTOR_BUFFER_SIZE);
 	if (ret) {
 		pr_err("Failed to read Product Revision Level String Descriptor\n");
 		return ret;
 	}
-	memset(string_buf, 0, STRING_BUFFER_SIZE);
-	parse_string_desc(desc_buf, string_buf);
-	len = strlcpy(pversion, string_buf, PRODUCT_REVISION_LEVEL_STRING_DESC_SIZE);
+
+	memset(str_buf, 0, STRING_BUFFER_SIZE);
+	ufs_eom_parse_string_desc(desc_buf, str_buf);
+	len = strlcpy(pversion, str_buf, PRODUCT_REVISION_LEVEL_STRING_DESC_SIZE);
 	if (len >= PRODUCT_REVISION_LEVEL_STRING_DESC_SIZE) {
 		pr_err("Truncation occurred. Need %zu bytes but pversion is %zu bytes.\n",
-								len, PRODUCT_REVISION_LEVEL_STRING_DESC_SIZE);
+		       len, PRODUCT_REVISION_LEVEL_STRING_DESC_SIZE);
 		return ERROR;
 	}
 
 	return SUCCESS;
 }
 
-static int config_eom(int peer, int lane, int timing, int volt, int target_count)
+/**
+ * ufs_eom_read_capabilities() - Read EOM hardware capabilities from M-PHY
+ *                               registers and populate the caps structure.
+ * @ctx: EOM session context.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+static int ufs_eom_read_capabilities(struct ufs_eom_context *ctx)
 {
-	int ret;
+	struct ufs_eom_caps *caps = &ctx->caps;
+	struct ufs_eom_config *cfg = &ctx->cfg;
+	int eom_cap, unipro_verinfo, unipro_ver;
 
-	/* Enable Eye Monitor */
-	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_ENABLE, SELECT_RX(lane)), ATTR_SET_NOR, 1, peer);
-	if (ret) {
-		pr_err("Failed to set RX_EYEMON_Enable\n");
-		return ret;
+	eom_cap = uic_get(ctx->bsg_fd,
+			  UIC_ARG_MIB_SEL(RX_EYEMON_CAPABILITY, SELECT_RX(cfg->start_lane)),
+			  cfg->local_peer);
+	if (eom_cap < 0) {
+		pr_err("Failed to read RX_EYEMON_Capability\n");
+		return ERROR;
 	}
 
-	/* Config Eye Monitor timing steps */
-	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_TIMING_STEPS, SELECT_RX(lane)), ATTR_SET_NOR, timing, peer);
-	if (ret) {
-		pr_err("Failed to set RX_EYEMON_Timing_Steps\n");
-		return ret;
+	if (!(eom_cap & 0x1)) {
+		pr_err("EOM is not supported\n");
+		return ERROR;
 	}
 
-	/* Config Eye Monitor voltage steps */
-	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_STEPS, SELECT_RX(lane)), ATTR_SET_NOR, volt, peer);
-	if (ret) {
-		pr_err("Failed to set RX_EYEMON_Voltage_Steps\n");
-		return ret;
+	if (eom_cap & EOM_CAP_EXTENDED_VOLTAGE)
+		ctx->caps.use_extended_vrange = true;
+
+	caps->rx_eyemon_cap = eom_cap;
+	ctx->gear = uic_get(ctx->bsg_fd, UIC_ARG_MIB_SEL(PA_RXGEAR, SELECT_RX(0)), 0);
+	if (ctx->gear < 0) {
+		pr_err("Failed to get current gear from PA_RXGEAR\n");
+		return ERROR;
 	}
 
-	/* Config Eye Monitor target test count */
-	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_TARGET_TEST_COUNT, SELECT_RX(lane)),
-				ATTR_SET_NOR, target_count, peer);
-	if (ret) {
-		pr_err("Failed to set RX_EYEMON_Target_Test_Count\n");
-		return ret;
+	if (ctx->gear < EOM_SUPPORTED_MIN_GEAR) {
+		pr_err("EOM is not supported at current gear %d\n", ctx->gear);
+		return ERROR;
 	}
 
-	/* Select NO_ADAPT */
-	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(PA_TXHSADAPTTYPE, SELECT_TX(0)), ATTR_SET_NOR, PA_NO_ADAPT, 0);
-	if (ret) {
-		pr_err("Failed to set NO_ADAPT\n");
-		return ret;
+	ctx->rate = uic_get(ctx->bsg_fd, UIC_ARG_MIB_SEL(RX_HSRATE_SERIES, SELECT_RX(0)), 0);
+	if (ctx->rate < 0) {
+		pr_err("Failed to get current rate from RX_HSRATE_Series\n");
+		return ERROR;
 	}
 
-	/* Do a Power Mode Change to Fast Mode to apply NO_ADAPT and also trigger a RCT to kick start EOM */
-	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(PA_PWRMODE, SELECT_TX(0)), ATTR_SET_NOR, 0x11, 0);
-	if (ret) {
-		pr_err("Failed to trigger RCT\n");
-		return ret;
+	caps->timing_max_steps = uic_get(ctx->bsg_fd,
+					 UIC_ARG_MIB_SEL(RX_EYEMON_TIMING_MAX_STEPS_CAPABILITY,
+							 SELECT_RX(cfg->start_lane)),
+					 cfg->local_peer);
+	if (caps->timing_max_steps < 0) {
+		pr_err("Failed to get RX_EYEMON_Timing_MAX_Steps_Capability\n");
+		return ERROR;
 	}
 
-	/* Poll UniPro State to confirm PMC is done. */
-	while (1) {
-		ret = uic_get(bsg_fd, UIC_ARG_MIB_SEL(QCOM_DME_VS_UNIPRO_STATE, SELECT_TX(0)), 0);
-		if (ret < 0) {
-			/* Failed to get QCOM_DME_VS_UNIPRO_STATE, maybe not supported? */
-			break;
-		} else if ((ret & QCOM_DME_VS_UNIPRO_STATE_MASK) == QCOM_DME_VS_UNIPRO_STATE_LINK_UP) {
-			break;
-		}
+	caps->timing_max_offset = uic_get(ctx->bsg_fd,
+					  UIC_ARG_MIB_SEL(RX_EYEMON_TIMING_MAX_OFFSET_CAPABILITY,
+							  SELECT_RX(cfg->start_lane)),
+					  cfg->local_peer);
+	if (caps->timing_max_offset < 0) {
+		pr_err("Failed to get RX_EYEMON_Timing_MAX_Offset_Capability\n");
+		return ERROR;
 	}
 
-	/* QCOM_DME_VS_UNIPRO_STATE not supported? Delay a bit to make sure PMC is completed */
-	if (ret < 0)
-		usleep(200000);
+	caps->voltage_max_steps = uic_get(ctx->bsg_fd,
+					  UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_MAX_STEPS_CAPABILITY,
+							  SELECT_RX(cfg->start_lane)),
+					  cfg->local_peer);
+	if (caps->voltage_max_steps < 0) {
+		pr_err("Failed to get RX_EYEMON_Voltage_MAX_Steps_Capability\n");
+		return ERROR;
+	}
+
+	caps->voltage_max_offset = uic_get(ctx->bsg_fd,
+					   UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_MAX_OFFSET_CAPABILITY,
+							   SELECT_RX(cfg->start_lane)),
+					   cfg->local_peer);
+	if (caps->voltage_max_offset < 0) {
+		pr_err("Failed to get RX_EYEMON_Voltage_MAX_Offset_Capability\n");
+		return ERROR;
+	}
+
+	unipro_verinfo = uic_get(ctx->bsg_fd,
+				 UIC_ARG_MIB_SEL(PA_LOCALVERINFO, SELECT_RX(0)),
+				 cfg->local_peer);
+	if (unipro_verinfo < 0) {
+		pr_err("Failed to get PA_LOCALVERINFO\n");
+		return ERROR;
+	}
+
+	unipro_ver = unipro_verinfo & UFS_UNIPRO_VER_MASK;
+	caps->unipro_ver = unipro_ver;
+
+	if (cfg->verbose_logging) {
+		printf("PA_RxGear: %d\n", ctx->gear);
+		printf("RX_HSRATE_Series: %d\n", ctx->rate);
+		printf("EOM Capabilities:\n");
+		printf("  TimingMaxSteps  %d  TimingMaxOffset  %d\n",
+		       caps->timing_max_steps, caps->timing_max_offset);
+		printf("  VoltageMaxSteps %d  VoltageMaxOffset %d\n",
+		       caps->voltage_max_steps, caps->voltage_max_offset);
+	}
 
 	return SUCCESS;
 }
 
-int eom_scan(int peer, int lane, int timing, int volt, int target_count)
+/**
+ * ufs_eom_populate_data_pattern() - Fill a buffer with pseudo-random data for
+ *                                   I/O stress.
+ * @buffer: Buffer to fill; must be at least EOM_TEMP_DATA_SIZE bytes.
+ */
+static void ufs_eom_populate_data_pattern(char *buffer)
 {
-	struct EOMData *data = &eom_data;
-	int voltage_direction, timing_direction;
-	int voltage_steps, timing_steps;
-	int eom_start, eom_tested_count, eom_error_count;
+	unsigned int count = EOM_TEMP_DATA_SIZE / sizeof(uint32_t);
+	unsigned int i;
+	uint64_t seed = (uint64_t)rand();
+	uint32_t *buf = (uint32_t *)buffer;
+
+	for (i = 0; i < count; i++)
+		buf[i] = (uint32_t)(fast_rand64(&seed) & 0xFFFFFFFF);
+}
+
+/**
+ * ufs_eom_do_io_stress() - Write and optionally read back a random data block
+ *                          to stress the UFS link during an EOM scan.
+ * @ctx: EOM session context.
+ *
+ * Return: SUCCESS on success, ERROR on I/O failure.
+ */
+static int ufs_eom_do_io_stress(struct ufs_eom_context *ctx)
+{
 	int ret;
-	__u8 volt_dir_shift = EOM_DIRECTION_SHIFT;
-	__u8 vstep_mask = EOM_STEP_MASK;
 
-	if (data->use_extended_voltage) {
-		volt_dir_shift = EOM_DIRECTION_SHIFT_EXT;
-		vstep_mask = EOM_STEP_MASK_EXT;
-	}
+	ufs_eom_populate_data_pattern(ufs_eom_tmp_buf);
 
-	if (volt < 0) {
-		voltage_direction = 1;
-		voltage_steps = (voltage_direction << volt_dir_shift) | (-volt & vstep_mask);
-	} else {
-		voltage_direction = 0;
-		voltage_steps = (voltage_direction << volt_dir_shift) | (volt & vstep_mask);
-	}
-
-	if (timing < 0) {
-		timing_direction = 1;
-		timing_steps = (timing_direction << EOM_DIRECTION_SHIFT) | (-timing & EOM_STEP_MASK);
-	} else {
-		timing_direction = 0;
-		timing_steps = (timing_direction << EOM_DIRECTION_SHIFT) | (timing & EOM_STEP_MASK);
-	}
-
-	ret = config_eom(peer, lane, timing_steps, voltage_steps, target_count);
-	if (ret) {
-		pr_err("Failed to configure EOM.\n");
-		return ret;
-	}
-
-repeat_eom_scan:
-	if (!do_io)
-		goto skip_io;
-
-	/* Write to excercise peer device's Rx */
-	populate_data_pattern(tmp_buf);
-	ret = pwrite(tmp_fd, tmp_buf, EOM_TEMP_DATA_SIZE, 0);
+	ret = pwrite(ctx->data_fd, ufs_eom_tmp_buf, EOM_TEMP_DATA_SIZE, 0);
 	if (ret < 0) {
 		pr_err("Failed to write tmp file\n");
 		return ERROR;
 	}
 
-	if (peer == LOCAL) {
-		/* Read to excercise local device's Rx */
-		ret = pread(tmp_fd, tmp_buf, EOM_TEMP_DATA_SIZE, 0);
+	if (ctx->cfg.local_peer == LOCAL) {
+		ret = pread(ctx->data_fd, ufs_eom_tmp_buf, EOM_TEMP_DATA_SIZE, 0);
 		if (ret < 0) {
 			pr_err("Failed to read tmp file\n");
 			return ERROR;
 		}
 	}
 
-skip_io:
-	/* Get RX_EYEMON_Start */
-	eom_start = uic_get(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_START, SELECT_RX(lane)), peer);
-	if (eom_start < 0) {
-		pr_err("Failed to get RX_EYEMON_Start, eom_start = %d\n", eom_start);
-		return ERROR;
-	}
-
-	/* EOM has not yet stopped */
-	if (eom_start & RX_EYEMON_START_MASK)
-		goto repeat_eom_scan;
-
-	/* Get RX_EYEMON_Tested_Count */
-	eom_tested_count = uic_get(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_TESTED_COUNT, SELECT_RX(lane)), peer);
-	if (eom_tested_count < 0) {
-		pr_err("Failed to get RX_EYEMON_Tested_Count\n");
-		return ERROR;
-	}
-
-	/* Get RX_EYEMON_Error_Count */
-	eom_error_count = uic_get(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_ERROR_COUNT, SELECT_RX(lane)), peer);
-	if (eom_error_count < 0) {
-		pr_err("Failed to get RX_EYEMON_Error_Count\n");
-		return ERROR;
-	}
-
-	/* EOM has stopped, good to log results */
-	if (eom_tested_count >= target_count || eom_error_count >= EOM_PHY_ERROR_COUNT_THRESHOLD) {
-		if (verbose)
-			printf("lane: %d timing: %d voltage: %d error count: %d [tested_count: %d]\n", lane, timing, volt,
-												       eom_error_count,
-												       eom_tested_count);
-
-		data->er[data->data_cnt].lane = lane;
-		data->er[data->data_cnt].timing = timing;
-		data->er[data->data_cnt].volt = volt;
-		data->er[data->data_cnt].error_cnt = eom_error_count;
-		data->data_cnt ++;
-		if (data->data_cnt > eom_result_count) {
-			pr_err("The count of data exceeds the maximum %d of the device\n", eom_result_count);
-			return ERROR;
-		}
-
-		return SUCCESS;
-	}
-
-	/* EOM is running or has not yet started */
-	goto repeat_eom_scan;
+	return SUCCESS;
 }
 
-int disable_eye_monitor(int lane, int peer)
+/**
+ * ufs_eom_encode_steps() - Encode a signed voltage or timing value into the
+ *                          M-PHY register format.
+ * @val: Signed step value to encode.
+ * @use_extended: True if the extended (7-bit) step format should be used.
+ *
+ * Return: Encoded register value with direction bit and magnitude.
+ */
+static __u32 ufs_eom_encode_steps(int val, bool use_extended)
+{
+	int dir_shift = use_extended ? EOM_DIRECTION_SHIFT_EXT : EOM_DIRECTION_SHIFT;
+	__u32 step_mask = use_extended ? EOM_STEP_MASK_EXT : EOM_STEP_MASK;
+	__u32 dir = (val < 0) ? 1 : 0;
+	__u32 step = (val < 0) ? ((__u32)-val) : ((__u32)val);
+
+	return (dir << dir_shift) | (step & step_mask);
+}
+
+/**
+ * ufs_eom_apply_steps() - Apply encoded voltage and timing steps.
+ * @ctx: EOM session context.
+ * @tstep: Encoded timing step value.
+ * @vstep: Encoded voltage step value.
+ * @lane: Lane index to configure.
+ * @peer: 0 for local, non-zero for peer.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+static int ufs_eom_apply_steps(struct ufs_eom_context *ctx, __u32 tstep,
+			       __u32 vstep, int lane, int peer)
 {
 	int ret;
 
-	/* Disable Eye Monitor */
-	ret = uic_set(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_ENABLE, SELECT_RX(lane)), ATTR_SET_NOR, 0, peer);
+	ret = uic_set(ctx->bsg_fd,
+		      UIC_ARG_MIB_SEL(RX_EYEMON_TIMING_STEPS, SELECT_RX(lane)),
+		      ATTR_SET_NOR, tstep, peer);
+	if (ret) {
+		pr_err("Failed to set RX_EYEMON_Timing_Steps\n");
+		return ret;
+	}
+
+	ret = uic_set(ctx->bsg_fd,
+		      UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_STEPS, SELECT_RX(lane)),
+		      ATTR_SET_NOR, vstep, ctx->cfg.local_peer);
+	if (ret) {
+		pr_err("Failed to set RX_EYEMON_Voltage_Steps\n");
+		return ret;
+	}
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_config_and_start() - Program all EOM M-PHY attributes for a given point
+ *                              and trigger a Power Mode Change to start the monitor.
+ * @ctx: EOM session context.
+ * @lane: Lane index to configure.
+ * @tstep: Encoded timing step value.
+ * @vstep: Encoded voltage step value.
+ * @peer: 0 for local, non-zero for peer.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+static int ufs_eom_config_and_start(struct ufs_eom_context *ctx, int lane,
+				    __u32 tstep, __u32 vstep, int peer)
+{
+	int target_test_count = ctx->cfg.target_test_count;
+	int ret;
+
+	ret = uic_set(ctx->bsg_fd,
+		      UIC_ARG_MIB_SEL(RX_EYEMON_ENABLE, SELECT_RX(lane)),
+		      ATTR_SET_NOR, 1, peer);
+	if (ret) {
+		pr_err("Failed to set RX_EYEMON_Enable\n");
+		return ret;
+	}
+
+	ret = ufs_eom_apply_steps(ctx, tstep, vstep, lane, peer);
+	if (ret)
+		return ret;
+
+	ret = uic_set(ctx->bsg_fd,
+		      UIC_ARG_MIB_SEL(RX_EYEMON_TARGET_TEST_COUNT, SELECT_RX(lane)),
+		      ATTR_SET_NOR, target_test_count, peer);
+	if (ret) {
+		pr_err("Failed to set RX_EYEMON_Target_Test_Count\n");
+		return ret;
+	}
+
+	/* Select NO_ADAPT to avoid disturbing the link */
+	ret = uic_set(ctx->bsg_fd,
+		      UIC_ARG_MIB_SEL(PA_TXHSADAPTTYPE, SELECT_TX(0)),
+		      ATTR_SET_NOR, PA_NO_ADAPT, 0);
+	if (ret) {
+		pr_err("Failed to set NO_ADAPT\n");
+		return ret;
+	}
+
+	/* Power Mode Change to Fast Mode triggers an RCT that starts EOM */
+	ret = uic_set(ctx->bsg_fd,
+		      UIC_ARG_MIB_SEL(PA_PWRMODE, SELECT_TX(0)),
+		      ATTR_SET_NOR, 0x11, 0);
+	if (ret) {
+		pr_err("Failed to trigger RCT via PA_PWRMODE\n");
+		return ret;
+	}
+
+	/* Wait for the Power Mode Change to complete */
+	while (1) {
+		ret = uic_get(ctx->bsg_fd,
+			      UIC_ARG_MIB_SEL(QCOM_DME_VS_UNIPRO_STATE,
+					      SELECT_TX(0)), 0);
+		if (ret < 0)
+			break;
+		if ((ret & QCOM_DME_VS_UNIPRO_STATE_MASK) ==
+		    QCOM_DME_VS_UNIPRO_STATE_LINK_UP)
+			break;
+	}
+
+	/* If DME_VS_UNIPRO_STATE is unsupported, wait a fixed interval */
+	if (ret < 0)
+		usleep(200000);
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_may_stop() - Check whether the current EOM measurement has
+ *                      reached a terminal condition.
+ * @ctx: EOM session context.
+ * @tested_count: Number of symbols tested so far.
+ * @error_count: Number of PHY errors observed so far.
+ *
+ * Return: SUCCESS if the measurement is complete and the result should be
+ *         recorded, AGAIN if the measurement is still in progress, or ERROR
+ *         if the result buffer is full.
+ */
+static int ufs_eom_may_stop(struct ufs_eom_context *ctx, int tested_count,
+			    int error_count)
+{
+	struct ufs_eom_data *data = &ctx->data;
+	int target_test_count = ctx->cfg.target_test_count;
+
+	if (tested_count >= target_test_count - 3 ||
+	    error_count >= EOM_PHY_ERROR_COUNT_THRESHOLD) {
+		if (data->data_cnt >= ctx->eom_result_count) {
+			pr_err("Result count exceeds maximum %d\n",
+			       ctx->eom_result_count);
+			return ERROR;
+		}
+		return SUCCESS;
+	}
+	return AGAIN;
+}
+
+/**
+ * ufs_eom_scan_point() - Perform a single EOM measurement at a given lane, timing
+ *                  and voltage offset.
+ * @ctx: EOM session context.
+ * @lane: Lane index to measure.
+ * @timing: Signed timing offset to apply.
+ * @volt: Signed voltage offset to apply.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+int ufs_eom_scan_point(struct ufs_eom_context *ctx, int lane, int timing, int volt)
+{
+	struct ufs_eom_data *data = &ctx->data;
+	__u32 timing_steps, voltage_steps;
+	int eom_start, eom_tested_count, eom_error_count, ret;
+
+	timing_steps = ufs_eom_encode_steps(timing, false);
+	voltage_steps = ufs_eom_encode_steps(volt, ctx->caps.use_extended_vrange);
+
+	ret = ufs_eom_config_and_start(ctx, lane, timing_steps, voltage_steps,
+				       ctx->cfg.local_peer);
+	if (ret) {
+		pr_err("Failed to configure EOM hardware\n");
+		return ret;
+	}
+
+	while (1) {
+		if (ctx->cfg.generate_io) {
+			ret = ufs_eom_do_io_stress(ctx);
+			if (ret)
+				return ret;
+		}
+
+		eom_start = uic_get(ctx->bsg_fd,
+				    UIC_ARG_MIB_SEL(RX_EYEMON_START,
+						    SELECT_RX(lane)),
+				    ctx->cfg.local_peer);
+		if (eom_start < 0) {
+			pr_err("Failed to get RX_EYEMON_Start\n");
+			return ERROR;
+		}
+
+		/* EOM is still running, keep polling */
+		if (eom_start & RX_EYEMON_START_MASK)
+			continue;
+
+		eom_tested_count = uic_get(ctx->bsg_fd,
+					   UIC_ARG_MIB_SEL(RX_EYEMON_TESTED_COUNT,
+							   SELECT_RX(lane)),
+					   ctx->cfg.local_peer);
+		if (eom_tested_count < 0) {
+			pr_err("Failed to get RX_EYEMON_Tested_Count\n");
+			return ERROR;
+		}
+
+		eom_error_count = uic_get(ctx->bsg_fd,
+					  UIC_ARG_MIB_SEL(RX_EYEMON_ERROR_COUNT,
+							  SELECT_RX(lane)),
+					  ctx->cfg.local_peer);
+		if (eom_error_count < 0) {
+			pr_err("Failed to get RX_EYEMON_Error_Count\n");
+			return ERROR;
+		}
+
+		ret = ufs_eom_may_stop(ctx, eom_tested_count, eom_error_count);
+		if (ret != AGAIN) {
+			if (ctx->cfg.verbose_logging)
+				printf("lane: %d timing: %d voltage: %d error_cnt: %d [tested: %d]\n",
+					lane, timing, volt, eom_error_count,
+					eom_tested_count);
+
+			data->er[data->data_cnt].lane = lane;
+			data->er[data->data_cnt].timing = timing;
+			data->er[data->data_cnt].volt = volt;
+			data->er[data->data_cnt].error_cnt = eom_error_count;
+			data->data_cnt++;
+
+			return ret;
+		}
+
+		/* EOM has not yet kicked start, keep polling */
+	}
+}
+
+/**
+ * ufs_eom_disable_eye_monitor() - Disable the M-PHY eye monitor for a lane.
+ * @ctx: EOM session context.
+ * @lane: Lane index to disable.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+int ufs_eom_disable_eye_monitor(struct ufs_eom_context *ctx, int lane)
+{
+	int ret;
+
+	ret = uic_set(ctx->bsg_fd,
+		      UIC_ARG_MIB_SEL(RX_EYEMON_ENABLE, SELECT_RX(lane)),
+		      ATTR_SET_NOR, 0, ctx->cfg.local_peer);
 	if (ret) {
 		pr_err("Failed to disable EOM for lane %d\n", lane);
 		return ret;
@@ -414,513 +798,275 @@ int disable_eye_monitor(int lane, int peer)
 	return SUCCESS;
 }
 
-static int generate_eom_report(char *eom_file, struct EOMData *data)
+/**
+ * ufs_eom_scan_range() - Scan the full configured timing/voltage range across
+ *                        all requested lanes.
+ * @ctx: EOM session context.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+static int ufs_eom_scan_range(struct ufs_eom_context *ctx)
 {
-	char mname[MANUFACTURER_NAME_STRING_DESC_SIZE];
-	char pname[PRODUCT_NAME_STRING_DESC_SIZE];
-	char pver[PRODUCT_REVISION_LEVEL_STRING_DESC_SIZE];
-	int i, l, n, ret;
-	FILE *file;
-
-	ret = get_device_info(mname, pname, pver);
-	if (ret)
-		return ret;
-
-	file = fopen(eom_file, "w");
-	if (!file) {
-		pr_err("Failed to create EOM result file %s\n", eom_file);
-		return ERROR;
-	}
-
-	fprintf(file, "UFS %s Side Eye Monitor Start\n", data->local_peer ? "Device" : "Host");
-	fprintf(file, "- - - - UFS INQUIRY ID: %s %s %s\n", mname, pname, pver);
-	fprintf(file, "- - - - UFS Gear Speed: HS-G%d Rate-%c\n", data->gear, data->rate == PA_HS_MODE_A ? 'A' : 'B');
-	fprintf(file, "EOM Capabilities:\n");
-	fprintf(file, "TimingMaxSteps %d TimingMaxOffset %d\n", data->timing_max_steps, data->timing_max_offset);
-	fprintf(file, "VoltageMaxSteps %d VoltageMaxOffset %d\n\n", data->voltage_max_steps, data->voltage_max_offset);
-
-	for (i = 0; i < data->data_cnt; i++)
-		fprintf(file, "lane: %d timing: %d voltage: %d error count: %d\n",
-			data->er[i].lane, data->er[i].timing, data->er[i].volt, data->er[i].error_cnt);
-		fprintf(file, "\n");
-
-	fclose(file);
-	printf("EOM results saved to %s\n", eom_file);
-
-	return SUCCESS;
-}
-
-static int check_output_path(const char *path)
-{
-	int i = 0, length = strlen(path);
-
-	for (; i < length; i++)
-		if (path[i] == ' ')
-			return ERROR;
-
-	if (path[length - 1] != '/')
-		return ERROR;
-
-	return SUCCESS;
-}
-
-static int init_lane(void)
-{
-	int l, ret;
-
-	ret = get_value_from_cli(&l);
-	if (ret) {
-		pr_err("Invalid input for Lane number\n");
-		return ERROR;
-	}
-
-	if (l < 0 || l > 1) {
-		pr_err("Invalid Lane number\n");
-		return ERROR;
-	}
-
-	lane = l;
-	eom_data.num_lanes = 1;
-
-	return SUCCESS;
-}
-
-static int init_target_test_count(void)
-{
-	int t, ret;
-
-	ret = get_value_from_cli(&t);
-	if (ret) {
-		pr_err("Invalid input for target test count\n");
-		return ERROR;
-	}
-
-	if (t <= 0 || t > EOM_TARGET_TEST_COUNT_MAX) {
-		pr_err("Invalid target test count\n");
-		return ERROR;
-	}
-
-	target_test_count = t;
-
-	return SUCCESS;
-}
-
-static int parse_args(int argc, char *argv[])
-{
-	int i, c = 0, ret = ERROR;
-
-	if (argc < 2) {
-		pr_err("Too less args, try 'ufseom -h'\n");
-		return ret;
-	}
-
-	if (!strcmp(argv[1], "--version")) {
-		printf("ufseom version %s.\n", EOM_VERSION);
-		return ret;
-	} else if (!strcmp(argv[1], "-h")) {
-		printf("%s\n", ufseom_help);
-		return ret;
-	}
-
-	while (-1 != (c = getopt_long(argc, argv, ufseom_short_options, ufseom_long_options, &i))) {
-		switch (c) {
-		case 'p':
-			eom_data.local_peer = PEER;
-			ret = SUCCESS;
-			break;
-		case 'l':
-			eom_data.local_peer = LOCAL;
-			ret = SUCCESS;
-			break;
-		case 'D':
-			do_io = true;
-			ret = SUCCESS;
-			break;
-		case 'V':
-			verbose = true;
-			ret = SUCCESS;
-			break;
-		case 'L':
-			ret = init_lane();
-			break;
-		case 'o':
-			ret = init_device_path(output_path);
-			break;
-		case 'd':
-			ret = init_device_path(device_path);
-			break;
-		case 't':
-			ret = init_target_test_count();
-			break;
-		case 1:
-			ret = get_voltage_timing_value_from_cli(&voltage_low);
-			break;
-		case 2:
-			ret = get_voltage_timing_value_from_cli(&voltage_high);
-			break;
-		case 3:
-			ret = get_voltage_timing_value_from_cli(&timing_left);
-			break;
-		case 4:
-			ret = get_voltage_timing_value_from_cli(&timing_right);
-			break;
-		default:
-			pr_err("I cannot understand, please try 'ufseom -h'.\n");
-			ret = ERROR;
-			break;
-		}
-
-		if (ret)
-			break;
-	}
-
-	if (ret)
-		return ret;
-
-	if (eom_data.local_peer == INIT) {
-		pr_err("Local or peer is not given\n");
-		return ERROR;
-	}
-
-	if (lane == INIT) {
-		lane = 0;
-		eom_data.num_lanes = 2;
-		pr_err("Lane no. is not given, collect EOM data for all connected lanes\n");
-	}
-
-	if (target_test_count == INIT) {
-		target_test_count = EOM_TARGET_TEST_COUNT_DEFAULT;
-		pr_err("Target test count is not given, use default %d\n", target_test_count);
-	}
-
-	if (device_path[0] == '\0') {
-		pr_err("Path to bsg device not provided.\n");
-		return ERROR;
-	}
-
-	if (output_path[0] == '\0') {
-		pr_err("Path to output folder not provided.\n");
-		return ERROR;
-	}
-
-	/* Check space and '/' in the given output path */
-	if (check_output_path(output_path)) {
-		pr_err("Invalid output path\n");
-		return ERROR;
-	}
-
-	return SUCCESS;
-}
-
-static int timing_voltage_sanity_check(struct EOMData *data)
-{
-	int ret = ERROR;
-
-	if (voltage_low == EOM_TIMING_VOLTAGE_INIT)
-		voltage_low = -data->voltage_max_steps;
-
-	if (voltage_high == EOM_TIMING_VOLTAGE_INIT)
-		voltage_high = data->voltage_max_steps;
-
-	if (timing_left == EOM_TIMING_VOLTAGE_INIT)
-		timing_left = -data->timing_max_steps;
-
-	if (timing_right == EOM_TIMING_VOLTAGE_INIT)
-		timing_right = data->timing_max_steps;
-
-	/* Sanity check for voltage range*/
-	if (voltage_low > data->voltage_max_steps || voltage_low < -data->voltage_max_steps ||
-				voltage_high > data->voltage_max_steps || voltage_high < -data->voltage_max_steps) {
-		pr_err("Invalid voltage range: hardware limits: [-%d, %d]\n", data->voltage_max_steps, data->voltage_max_steps);
-		ret = ERROR;
-		goto out;
-	}
-
-	/* Sanity check for timing range*/
-	if (timing_left > data->timing_max_steps || timing_left < -data->timing_max_steps ||
-				timing_right > data->timing_max_steps || timing_right < -data->timing_max_steps) {
-		pr_err("Invalid timing range: hardware limits: [-%d, %d]\n", data->timing_max_steps, data->timing_max_steps);
-		ret = ERROR;
-		goto out;
-	}
-
-	if (voltage_low > voltage_high) {
-		pr_err("Voltage high is less than voltage low\n");
-		ret = ERROR;
-		goto out;
-	}
-
-	if (timing_left > timing_right) {
-		pr_err("Timing right is less than timing left\n");
-		ret = ERROR;
-		goto out;
-	}
-
-	ret = SUCCESS;
-out:
-	return ret;
-}
-
-static void init_eom_operation(void)
-{
-	lane = INIT;
-	target_test_count = INIT;
-	tmp_fd = INIT;
-	voltage_low = EOM_TIMING_VOLTAGE_INIT;
-	voltage_high = EOM_TIMING_VOLTAGE_INIT;
-	timing_left = EOM_TIMING_VOLTAGE_INIT;
-	timing_right = EOM_TIMING_VOLTAGE_INIT;
-
-	output_path[0] = '\0';
-	device_path[0] = '\0';
-}
-
-int eom_scan_range(struct EOMData *data, int lane, int timing_left,
-		   int timing_right, int voltage_low, int voltage_high, int target_test_count)
-{
+	struct ufs_eom_config *cfg = &ctx->cfg;
 	int l, n, t, v, ret;
 
-	for (l = lane, n = data->num_lanes; n > 0; n--, l++) {
-		for (t = timing_left; t <= timing_right; t++) {
-			for (v = voltage_low; v <= voltage_high; v++) {
-				ret = eom_scan(data->local_peer, l, t, v, target_test_count);
+	for (l = cfg->start_lane, n = ctx->data.num_lanes; n > 0; n--, l++) {
+		for (t = cfg->timing_left; t <= cfg->timing_right; t++) {
+			for (v = cfg->voltage_low; v <= cfg->voltage_high; v++) {
+				ret = ufs_eom_scan_point(ctx, l, t, v);
 				if (ret) {
-					pr_err("Failed to run EOM Scan range for lane %d\n", l);
-					disable_eye_monitor(l, data->local_peer);
+					pr_err("EOM scan failed at lane %d "
+					       "timing %d volt %d\n", l, t, v);
+					ufs_eom_disable_eye_monitor(ctx, l);
 					return ret;
 				}
 			}
 		}
 
-		disable_eye_monitor(l, data->local_peer);
+		ufs_eom_disable_eye_monitor(ctx, l);
 	}
 
 	return SUCCESS;
 }
 
+/**
+ * ufs_eom_validate_range() - Validate and apply defaults for the scan range.
+ * @ctx: EOM session context.
+ *
+ * Return: SUCCESS on success, ERROR if any range is invalid.
+ */
+static int ufs_eom_validate_range(struct ufs_eom_context *ctx)
+{
+	struct ufs_eom_config *cfg = &ctx->cfg;
+	struct ufs_eom_caps *caps = &ctx->caps;
+
+	if (cfg->voltage_low == EOM_TIMING_VOLTAGE_INIT)
+		cfg->voltage_low = -caps->voltage_max_steps;
+	if (cfg->voltage_high == EOM_TIMING_VOLTAGE_INIT)
+		cfg->voltage_high = caps->voltage_max_steps;
+	if (cfg->timing_left == EOM_TIMING_VOLTAGE_INIT)
+		cfg->timing_left = -caps->timing_max_steps;
+	if (cfg->timing_right == EOM_TIMING_VOLTAGE_INIT)
+		cfg->timing_right = caps->timing_max_steps;
+
+	if (cfg->voltage_low < -caps->voltage_max_steps ||
+	    cfg->voltage_high > caps->voltage_max_steps ||
+	    cfg->voltage_low > cfg->voltage_high) {
+		pr_err("Invalid voltage range [%d, %d]; actual voltage range caps [-%d, %d]\n",
+		       cfg->voltage_low, cfg->voltage_high,
+		       caps->voltage_max_steps, caps->voltage_max_steps);
+		return ERROR;
+	}
+
+	if (cfg->timing_left < -caps->timing_max_steps ||
+	    cfg->timing_right > caps->timing_max_steps ||
+	    cfg->timing_left > cfg->timing_right) {
+		pr_err("Invalid timing range [%d, %d]; actual timing range caps [-%d, %d]\n",
+		       cfg->timing_left, cfg->timing_right,
+		       caps->timing_max_steps, caps->timing_max_steps);
+		return ERROR;
+	}
+
+	if (cfg->verbose_logging)
+		printf("Scan range: timing [%d, %d], voltage [%d, %d]\n",
+		       cfg->timing_left, cfg->timing_right,
+		       cfg->voltage_low, cfg->voltage_high);
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_alloc_memory_for_results() - Allocate the result array sized for the full scan
+ *                                      range.
+ * @ctx: EOM session context.
+ *
+ * Return: SUCCESS on success, ERROR if allocation fails.
+ */
+static int ufs_eom_alloc_memory_for_results(struct ufs_eom_context *ctx)
+{
+	struct ufs_eom_data *data = &ctx->data;
+	size_t result_size;
+
+	ctx->eom_result_count = (ctx->caps.timing_max_steps * 2 + 1) *
+				(ctx->caps.voltage_max_steps * 2 + 1) *
+				data->num_lanes;
+
+	result_size = (size_t)ctx->eom_result_count * sizeof(struct ufs_eom_result);
+	data->er = malloc(result_size);
+	if (!data->er) {
+		pr_err("Failed to allocate %zu bytes for EOM results\n",
+		       result_size);
+		return ERROR;
+	}
+	memset(data->er, 0, result_size);
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_setup_io() - Open the temporary I/O stress file and allocate the
+ *                      aligned I/O buffer if I/O stress is enabled.
+ * @ctx: EOM session context.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+static int ufs_eom_setup_io(struct ufs_eom_context *ctx)
+{
+	char tmp_file[DEVICE_PATH_NAME_SIZE_MAX + 64];
+
+	if (!ctx->cfg.generate_io)
+		return SUCCESS;
+
+	snprintf(tmp_file, sizeof(tmp_file), "%s%s",
+		 ctx->cfg.output_path, EOM_TMP_FILENAME);
+
+	ctx->data_fd = open(tmp_file, O_RDWR | O_DIRECT | O_CREAT,
+			    S_IWUSR | S_IRUSR);
+	if (ctx->data_fd < 0) {
+		pr_err("Failed to open tmp file %s\n", tmp_file);
+		return ERROR;
+	}
+
+	ufs_eom_tmp_buf = memalign(EOM_TEMP_DATA_MEM_ALIGN_SIZE,
+				   EOM_TEMP_DATA_SIZE);
+	if (!ufs_eom_tmp_buf) {
+		pr_err("Failed to allocate I/O buffer\n");
+		return ERROR;
+	}
+
+	return SUCCESS;
+}
+
+/**
+ * ufs_eom_format_output_filename() - Construct the output report file path.
+ * @ctx: EOM session context.
+ * @out: Output buffer to store the constructed path.
+ * @out_size: Size of @out in bytes.
+ */
+static void ufs_eom_format_output_filename(const struct ufs_eom_context *ctx,
+					   char *out, size_t out_size)
+{
+	const struct ufs_eom_config *cfg = &ctx->cfg;
+	const struct ufs_eom_data *data = &ctx->data;
+	char lane_str[16];
+
+	if (data->num_lanes == 2)
+		snprintf(lane_str, sizeof(lane_str), "0_1");
+	else
+		snprintf(lane_str, sizeof(lane_str), "%d", cfg->start_lane);
+
+	snprintf(out, out_size, "%s%s_lane_%s_gear_%d_ttc_%d.eom",
+		 cfg->output_path,
+		 cfg->local_peer ? "peer" : "local",
+		 lane_str,
+		 ctx->gear,
+		 cfg->target_test_count);
+}
+
+/**
+ * ufs_eom_scan() - Execute the full EOM scan over the configured range.
+ * @ctx: EOM session context.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
+static int ufs_eom_scan(struct ufs_eom_context *ctx)
+{
+	return ufs_eom_scan_range(ctx);
+}
+
+/**
+ * main() - Entry point for the ufseom command-line tool.
+ * @argc: Argument count.
+ * @argv: Argument vector.
+ *
+ * Return: SUCCESS on success, ERROR on failure.
+ */
 int main(int argc, char *argv[])
 {
-	struct EOMData *data = &eom_data;
+	struct ufs_eom_context *ctx;
+	char output_file[DEVICE_PATH_NAME_SIZE_MAX + 256];
 	struct timespec ts_start, ts_end;
-	char tmp_file[1024], output_file[1024], eom_file_name[256], lane_str[8];
-	size_t eom_result_size, len;
-	int t, v, l, n, eom_cap, cur_gear, cur_rate, ret;
-	int unipro_verinfo, unipro_ver;
+	int ret;
 
-	init_eom_operation();
+	ctx = calloc(1, sizeof(*ctx));
+	if (!ctx) {
+		pr_err("Failed to allocate EOM context\n");
+		return ERROR;
+	}
 
-	ret = parse_args(argc, argv);
+	ctx->bsg_fd = -1;
+	ctx->data_fd = -1;
+	ctx->cfg.local_peer = INIT;
+	ctx->cfg.start_lane = INIT;
+	ctx->cfg.target_test_count = INIT;
+	ctx->cfg.voltage_low = EOM_TIMING_VOLTAGE_INIT;
+	ctx->cfg.voltage_high = EOM_TIMING_VOLTAGE_INIT;
+	ctx->cfg.timing_left = EOM_TIMING_VOLTAGE_INIT;
+	ctx->cfg.timing_right = EOM_TIMING_VOLTAGE_INIT;
+
+	ret = ufs_eom_parse_args(argc, argv, &ctx->cfg);
 	if (ret)
-		return ret;
+		goto cleanup;
 
-	bsg_fd = open(device_path, O_RDWR);
-	if (bsg_fd < 0) {
-		pr_err("Failed to open file %s (%d).\n", device_path, bsg_fd);
-		return ERROR;
+	/* Determine number of lanes to scan */
+	if (ctx->cfg.start_lane == INIT) {
+		pr_err("Lane not specified, scanning all connected lanes\n");
+		ctx->cfg.start_lane = 0;
+		ctx->data.num_lanes = 2;
+	} else {
+		ctx->data.num_lanes = 1;
 	}
 
-	/* Get RX_EYEMON_Capability */
-	eom_cap = uic_get(bsg_fd, UIC_ARG_MIB_SEL(RX_EYEMON_CAPABILITY, SELECT_RX(lane)), data->local_peer);
-	if (eom_cap < 0) {
-		pr_err("Failed to read RX_EYEMON_Capability\n");
+	ctx->bsg_fd = open(ctx->cfg.device_path, O_RDWR);
+	if (ctx->bsg_fd < 0) {
+		pr_err("Failed to open BSG device %s\n", ctx->cfg.device_path);
 		ret = ERROR;
-		goto close_bsg;
-	} else if (!(eom_cap & 0x1)) {
-		pr_err("EOM is not supported\n");
-		ret = ERROR;
-		goto close_bsg;
-	} else if (eom_cap & EOM_CAP_EXTENDED_VOLTAGE) {
-		data->use_extended_voltage = true;
+		goto cleanup;
 	}
 
-	/* Get PA_RxGear */
-	cur_gear = uic_get(bsg_fd, UIC_ARG_MIB_SEL(PA_RXGEAR, SELECT_RX(0)), 0);
-	if (cur_gear < 0) {
-		pr_err("Failed to get current gear from PA_RXGEAR\n");
-		ret = ERROR;
-		goto close_bsg;
-	} else if (verbose) {
-		printf("PA_RxGear: %d\n", cur_gear);
-	}
+	ret = ufs_eom_read_capabilities(ctx);
+	if (ret)
+		goto cleanup;
 
-	if (cur_gear < EOM_SUPPORTED_MIN_GEAR) {
-		pr_err("EOM is not supported at current gear %d\n", cur_gear);
-		ret = ERROR;
-		goto close_bsg;
-	}
+	ret = ufs_eom_validate_range(ctx);
+	if (ret)
+		goto cleanup;
 
-	data->gear = cur_gear;
+	ret = ufs_eom_alloc_memory_for_results(ctx);
+	if (ret)
+		goto cleanup;
 
-	/* Get RX_HSRATE_Series */
-	cur_rate = uic_get(bsg_fd, UIC_ARG_MIB_SEL(RX_HSRATE_SERIES, SELECT_RX(0)), 0);
-	if (cur_rate < 0) {
-		pr_err("Failed to get current rate from RX_HSRATE_Series\n");
-		ret = ERROR;
-		goto close_bsg;
-	} else if (verbose) {
-		printf("RX_HSRATE_Series: %d\n", cur_rate);
-	}
+	ret = ufs_eom_setup_io(ctx);
+	if (ret)
+		goto cleanup;
 
-	data->rate = cur_rate;
+	ufs_eom_format_output_filename(ctx, output_file, sizeof(output_file));
 
-	if (!do_io)
-		goto skip_io_prepare;
-
-	len = strlcpy(tmp_file, output_path, sizeof(tmp_file));
-	if (len >= sizeof(tmp_file)) {
-		pr_err("Truncation occurred. Need %zu bytes but tmp_file is %zu bytes.\n",
-								len, sizeof(tmp_file));
-		return ERROR;
-	}
-
-	len = strlcat(tmp_file, ufseom_tmp_file, sizeof(tmp_file));
-	if (len >= sizeof(tmp_file)) {
-		pr_err("Truncation occurred. Need %zu bytes but tmp_file is %zu bytes.\n",
-								len, sizeof(tmp_file));
-		return ERROR;
-	}
-
-	tmp_fd = open(tmp_file, O_RDWR | O_DIRECT | O_CREAT, S_IWUSR | S_IRUSR);
-	if (tmp_fd < 0) {
-		pr_err("Failed to open file %s (%d)\n", tmp_file, tmp_fd);
-		ret = ERROR;
-		goto close_bsg;
-	}
-
-	/* Allocate buffer for I/O */
-	tmp_buf = memalign(EOM_TEMP_DATA_MEM_ALIGN_SIZE, EOM_TEMP_DATA_SIZE);
-	if (!tmp_buf) {
-		pr_err("Failed to allocate memory for I/O\n");
-		ret = ERROR;
-		goto close_tmp;
-	}
-
-skip_io_prepare:
-	/* EOM result file naming rule: local/peer_lane_0/_1_targetestcount.eom */
-	snprintf(lane_str, sizeof(lane_str), "%d", lane);
-	snprintf(eom_file_name, sizeof(eom_file_name), "%s_lane_%s_gear_%d_ttc_%d.eom",
-		 data->local_peer ? "peer" : "local",
-		 (data->num_lanes == 2) ? "0_1" : lane_str, cur_gear, target_test_count);
-	len = strlcpy(output_file, output_path, sizeof(output_file));
-	if (len >= sizeof(output_file)) {
-		pr_err("Truncation occurred. Need %zu bytes but output_file is %zu bytes.\n",
-								len, sizeof(output_file));
-		return ERROR;
-	}
-
-	len = strlcat(output_file, eom_file_name, sizeof(output_file));
-	if (len >= sizeof(output_file)) {
-		pr_err("Truncation occurred. Need %zu bytes but output_file is %zu bytes.\n",
-								len, sizeof(output_file));
-		return ERROR;
-	}
-
-	/* Get RX_EYEMON_Timing_MAX_Steps_Capability */
-	data->timing_max_steps = uic_get(bsg_fd,
-					 UIC_ARG_MIB_SEL(RX_EYEMON_TIMING_MAX_STEPS_CAPABILITY, SELECT_RX(lane)),
-					 data->local_peer);
-	if (data->timing_max_steps < 0) {
-		pr_err("Failed to get RX_EYEMON_Timing_MAX_Steps_Capability\n");
-		ret = ERROR;
-		goto out;
-	}
-
-	/* Get RX_EYEMON_Timing_MAX_Offset_Capability */
-	data->timing_max_offset = uic_get(bsg_fd,
-					  UIC_ARG_MIB_SEL(RX_EYEMON_TIMING_MAX_OFFSET_CAPABILITY, SELECT_RX(lane)),
-					  data->local_peer);
-	if (data->timing_max_offset < 0) {
-		pr_err("Failed to get RX_EYEMON_Timing_MAX_Offset_Capability\n");
-		ret = ERROR;
-		goto out;
-	}
-
-	/* Get RX_EYEMON_Voltage_MAX_Steps_Capability */
-	data->voltage_max_steps = uic_get(bsg_fd,
-					  UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_MAX_STEPS_CAPABILITY, SELECT_RX(lane)),
-					  data->local_peer);
-	if (data->voltage_max_steps < 0) {
-		pr_err("Failed to get RX_EYEMON_Voltage_MAX_Steps_Capability\n");
-		ret = ERROR;
-		goto out;
-	}
-
-	/* Get RX_EYEMON_Voltage_MAX_Offset_Capability */
-	data->voltage_max_offset = uic_get(bsg_fd,
-					   UIC_ARG_MIB_SEL(RX_EYEMON_VOLTAGE_MAX_OFFSET_CAPABILITY, SELECT_RX(lane)),
-					   data->local_peer);
-	if (data->voltage_max_offset < 0) {
-		pr_err("Failed to get RX_EYEMON_Voltage_MAX_Offset_Capability\n");
-		ret = ERROR;
-		goto out;
-	}
-
-	/* Get Unipro version */
-	unipro_verinfo = uic_get(bsg_fd,
-				UIC_ARG_MIB_SEL(PA_LOCALVERINFO, SELECT_RX(0)),
-				data->local_peer);
-	if (unipro_verinfo < 0) {
-		pr_err("Failed to get PA_LOCALVERINFO\n");
-		ret = ERROR;
-		goto out;
-	}
-
-	unipro_ver = unipro_verinfo & UFS_UNIPRO_VER_MASK;
-	data->unipro_ver = unipro_ver;
-
-	if (verbose) {
-		printf("EOM Capabilities:\n");
-		printf("TimingMaxSteps %d TimingMaxOffset %d\n", data->timing_max_steps, data->timing_max_offset);
-		printf("VoltageMaxSteps %d VoltageMaxOffset %d\n", data->voltage_max_steps, data->voltage_max_offset);
-	}
-
-	/* Sanity check for voltage and timing range*/
-	ret = timing_voltage_sanity_check(data);
-	if (ret) {
-		pr_err("Timing or voltage is invalid\n");
-		ret = ERROR;
-		goto out;
-	}
-
-	if (verbose)
-		printf("timing_left:%d, timing_right:%d, voltage_low:%d, voltage_high:%d\n",
-					timing_left, timing_right, voltage_low, voltage_high);
-
-	eom_result_count = (data->timing_max_steps * 2 + 1) * (data->voltage_max_steps * 2 + 1) * data->num_lanes;
-	eom_result_size = eom_result_count * sizeof(struct eom_result);
-	data->er = malloc(eom_result_size);
-	if (!data->er) {
-		pr_err("Failed to allocate memory for eom_result\n");
-		ret = ERROR;
-		goto out;
-	}
-	memset(data->er, 0, eom_result_size);
-
-	/* Set seed for a new sequence of pseudo-random integers */
 	srand((unsigned)clock());
-
 	printf("Start EOM Scan...\n");
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);
-	/* Main loop starts here */
-	ret = eom_scan_range(data, lane, timing_left, timing_right,
-				     voltage_low, voltage_high, target_test_count);
+
+	ret = ufs_eom_scan(ctx);
 	if (ret)
-		goto out;
+		goto cleanup;
+
+	ret = ufs_eom_generate_reports(ctx, output_file);
+	if (ret)
+		pr_err("Failed to generate EOM reports\n");
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_end);
-	printf("EOM Scan Finished!\n Time elapsed: %ld seconds\n", ts_end.tv_sec - ts_start.tv_sec);
+	printf("EOM Scan %s! Time elapsed: %ld seconds\n",
+	       ret ? "Failed" : "Finished",
+	       ts_end.tv_sec - ts_start.tv_sec);
 
-	ret = generate_eom_report(output_file, data);
-	if (ret)
-		pr_err("Failed to generate EOM report\n");
+cleanup:
+	free(ctx->data.er);
+	free(ufs_eom_tmp_buf);
 
-out:
-	free(data->er);
-	free(tmp_buf);
-close_tmp:
-	close(tmp_fd);
-close_bsg:
-	close(bsg_fd);
+	close(ctx->data_fd);
+	close(ctx->bsg_fd);
+
+	free(ctx);
 
 	return ret;
 }

@@ -16,9 +16,11 @@
 #include <string.h>
 #include <unistd.h>
 
-#define SUCCESS	0
+#define SUCCESS  0
 #define INIT	-1
 #define ERROR	-2
+#define INVAL	-3
+#define AGAIN	-4
 
 #define DEVICE_PATH_NAME_SIZE_MAX	256
 #define U32_TO_STR_SIZE_MAX		12
@@ -41,4 +43,5 @@ int init_device_path(char *path);
 int characteristics_look_up(struct ufs_characteristics *c, __u32 id);
 void dump_hex(__u8 *buf, __u16 len);
 int u32_to_str(uint32_t val, char *buf, size_t size);
+uint64_t fast_rand64(uint64_t *seed);
 #endif /* __COMMON_H__ */

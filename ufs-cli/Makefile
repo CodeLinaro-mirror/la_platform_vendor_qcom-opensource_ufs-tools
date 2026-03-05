@@ -5,7 +5,7 @@ COMMON_OBJS := $(OUT_DIR)/uic.o $(OUT_DIR)/query.o $(OUT_DIR)/ufs_bsg.o $(OUT_DI
 
 # Unique objects for each executable
 LSUFS_UNIQUE_OBJS := $(OUT_DIR)/shell.o $(OUT_DIR)/lsufs.o
-EOM_UNIQUE_OBJS := $(OUT_DIR)/ufs_eom.o
+EOM_UNIQUE_OBJS := $(OUT_DIR)/ufs_eom.o $(OUT_DIR)/ufs_eom_report.o
 
 # Combined object lists
 LSUFS_OBJS := $(LSUFS_UNIQUE_OBJS) $(COMMON_OBJS)

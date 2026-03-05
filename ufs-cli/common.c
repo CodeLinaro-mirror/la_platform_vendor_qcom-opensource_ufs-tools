@@ -109,3 +109,22 @@ int u32_to_str(uint32_t val, char *buf, size_t size)
 
 	return SUCCESS;
 }
+
+/**
+ * fast_rand64() - Fast pseudo-random 64-bit number generator (LCG).
+ *
+ * @seed: Pointer to the current PRNG state.
+ *
+ * Returns the next pseudo-random 64-bit value and updates *seed in place.
+ * Suitable for generating I/O stress data patterns; not cryptographically
+ * secure.
+ */
+uint64_t fast_rand64(uint64_t *seed)
+{
+	uint64_t val = *seed;
+
+	val = (370003845LL * val + 3037000493LL);
+	*seed = val & 0x1F;
+
+	return val & 0x7FFFFFFFFFFFFFFFLL;
+}

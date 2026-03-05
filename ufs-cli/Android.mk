@@ -13,7 +13,7 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 LOCAL_MODULE := ufseom
 LOCAL_MODULE_TAGS := optional
-LOCAL_SRC_FILES:= uic.c query.c ufs_bsg.c common.c ufs-eom/ufs_eom.c query_trans.c
+LOCAL_SRC_FILES:= uic.c query.c ufs_bsg.c common.c ufs-eom/ufs_eom.c query_trans.c ufs-eom/ufs_eom_report.c
 LOCAL_SHARED_LIBRARIES := libcutils libc
 LOCAL_C_INCLUDES+= $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include
 LOCAL_C_INCLUDES += $(LOCAL_PATH)/ufs-eom
