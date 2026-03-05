@@ -41,6 +41,35 @@ static int ufs_eom_write_report(const char *output_file,
 			data->er[i].lane, data->er[i].timing,
 			data->er[i].volt, data->er[i].error_cnt);
 
+	if (ctx->cfg.slt_mode) {
+		int l, n;
+
+		for (l = ctx->cfg.start_lane, n = data->num_lanes; n > 0; n--, l++) {
+			fprintf(f, "UFS EOM SLT (PassEyeWidth %.2fUI): "
+				   "Lane %d Eye Width %.2fUI (%d steps) - %s, "
+				   "Eye Center (timing step : %d)\n",
+				data->slt_eye_width_threshold[l], l,
+				data->slt_eye_width_ui[l],
+				data->slt_eye_width_steps[l],
+				(data->slt_eye_width_ui[l] <
+				 data->slt_eye_width_threshold[l])
+				? "Fail" : "Pass",
+				data->slt_eye_center[l]);
+
+			if (caps->unipro_ver < UFS_UNIPRO_VER_3) {
+				fprintf(f, "UFS EOM SLT (PassEyeHeight %.2fmV): "
+					   "Lane %d Eye Height %.2fmV (%d steps) - %s\n",
+					data->slt_eye_height_threshold[l], l,
+					data->slt_eye_height_mv[l],
+					data->slt_eye_height_steps[l],
+					(data->slt_eye_height_mv[l] <
+					 data->slt_eye_height_threshold[l])
+					? "Fail" : "Pass");
+			}
+		}
+		fprintf(f, "\n");
+	}
+
 	fclose(f);
 	printf("EOM results saved to %s\n", output_file);
 

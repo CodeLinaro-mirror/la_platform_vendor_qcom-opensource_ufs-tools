@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <malloc.h>
 #include <sys/stat.h>
+#include "ufs_eom_slt.h"
 #include "common.h"
 #include "query.h"
 #include "uic.h"
@@ -23,6 +24,7 @@ static char *ufs_eom_tmp_buf;
 
 static const char *ufseom_help =
 	"\nufseom cli:\n\n"
+	"ufseom [-p|--peer | -l|--local] [-D|--data] [--slt]\n"
 	"       [-L|--lane <lane>] [--voltage-low <v>] [--voltage-high <v>]\n"
 	"       [--timing-left <t>] [--timing-right <t>]\n"
 	"       [-t|--target <count>] [-o|--output <path>] [-d|--device <dev>]\n"
@@ -38,6 +40,7 @@ static const char *ufseom_help =
 	"  --voltage-high   Upper voltage bound (default: +voltage_max_steps)\n"
 	"  --timing-left    Left timing bound (default: -timing_max_steps)\n"
 	"  --timing-right   Right timing bound (default: +timing_max_steps)\n"
+	"  --slt            Run EOM STL screening\n"
 	"  -t, --target     Target test count per point (default: 0x5D)\n"
 	"  -o, --output     Directory for output files (must end with '/')\n"
 	"  -d, --device     Path to UFS BSG device (e.g. /dev/ufs-bsg0)\n"
@@ -47,6 +50,8 @@ static const char *ufseom_help =
 	"  ufseom -l -D -o /data/ -d /dev/ufs-bsg0\n\n"
 	"  # Scan peer Rx with I/O stress::\n"
 	"  ufseom -p -D -o /data/ -d /dev/ufs-bsg0\n\n"
+	"  # Run EOM STL screening:\n"
+	"  ufseom -l -D --slt -o /data/ -d /dev/ufs-bsg0\n\n"
 	"Note: disable UFS low-power features before running EOM:\n"
 	"  echo 0 > /sys/devices/<path>/*.ufshc/clkscale_enable\n"
 	"  echo 0 > /sys/devices/<path>/*.ufshc/clkgate_enable\n"
@@ -61,6 +66,7 @@ enum long_opt_ids {
 	OPT_VOLTAGE_HIGH = 2,
 	OPT_TIMING_LEFT = 3,
 	OPT_TIMING_RIGHT = 4,
+	OPT_SLT = 5,
 };
 
 static struct option long_opts[] = {
@@ -76,6 +82,7 @@ static struct option long_opts[] = {
 	{"voltage-high", required_argument, NULL, OPT_VOLTAGE_HIGH},
 	{"timing-left", required_argument, NULL, OPT_TIMING_LEFT},
 	{"timing-right", required_argument, NULL, OPT_TIMING_RIGHT},
+	{"slt", no_argument, NULL, OPT_SLT},
 	{NULL, 0, NULL, 0}
 };
 
@@ -240,6 +247,10 @@ static int ufs_eom_parse_args(int argc, char *argv[], struct ufs_eom_config *cfg
 			break;
 		case OPT_TIMING_RIGHT:
 			ret = ufs_eom_parse_int_arg(&cfg->timing_right);
+			break;
+		case OPT_SLT:
+			cfg->slt_mode = true;
+			ret = SUCCESS;
 			break;
 		default:
 			pr_err("Unknown option. Try 'ufseom -h'.\n");
@@ -955,9 +966,10 @@ static void ufs_eom_format_output_filename(const struct ufs_eom_context *ctx,
 	else
 		snprintf(lane_str, sizeof(lane_str), "%d", cfg->start_lane);
 
-	snprintf(out, out_size, "%s%s_lane_%s_gear_%d_ttc_%d.eom",
+	snprintf(out, out_size, "%s%s%s_lane_%s_gear_%d_ttc_%d.eom",
 		 cfg->output_path,
 		 cfg->local_peer ? "peer" : "local",
+		 cfg->slt_mode ? "_slt" : "",
 		 lane_str,
 		 ctx->gear,
 		 cfg->target_test_count);
@@ -971,6 +983,9 @@ static void ufs_eom_format_output_filename(const struct ufs_eom_context *ctx,
  */
 static int ufs_eom_scan(struct ufs_eom_context *ctx)
 {
+	if (ctx->cfg.slt_mode)
+		return ufs_eom_slt_scan(ctx);
+
 	return ufs_eom_scan_range(ctx);
 }
 

@@ -55,6 +55,15 @@ struct ufs_eom_data {
 	/* Collected scan results */
 	int data_cnt;
 	struct ufs_eom_result *er;
+
+	/* SLT eye measurement results (indexed by lane) */
+	int slt_eye_width_steps[2];
+	int slt_eye_height_steps[2];
+	int slt_eye_center[2];
+	float slt_eye_width_ui[2];
+	float slt_eye_height_mv[2];
+	float slt_eye_width_threshold[2];
+	float slt_eye_height_threshold[2];
 };
 
 /* EOM hardware capabilities read from M-PHY registers at session start */
@@ -77,6 +86,7 @@ struct ufs_eom_config {
 	int timing_left;
 	int timing_right;
 	int target_test_count;
+	bool slt_mode;
 	bool generate_io;
 	bool verbose_logging;
 	char output_path[DEVICE_PATH_NAME_SIZE_MAX];
