@@ -357,22 +357,33 @@ class ufs_eye_monitor_plot(object):
                 self.lane1_eye_center = None
 
     def in_eye_mask(self, x, y, lane_no):
+        """
+        Check if any part of the cell at (x, y) overlaps with the eye mask diamond.
+        x and y are the cell center coordinates (UI and mV).
+        Each cell spans [x-timing_step/2, x+timing_step/2] x [y-voltage_step/2, y+voltage_step/2].
+        We find the nearest point of the cell to the diamond center and check if it is inside the mask.
+        """
         assert((lane_no == 0) or (lane_no == 1))
         eye_center_timing_adj = None
         eye_center_step = self.lane0_eye_center if lane_no == 0 else self.lane1_eye_center
         if eye_center_step is not None:
             eye_center_timing_adj = round((eye_center_step * self.timing_step), 4)
+            half_t = self.timing_step / 2.0
+            half_v = self.voltage_step / 2.0
+            # Nearest point of the cell to the diamond center (eye_center_timing_adj, 0)
+            nearest_x = max(x - half_t, min(x + half_t, eye_center_timing_adj))
+            nearest_y = max(y - half_v, min(y + half_v, 0.0))
             use_univ_v3_thresholds = (float(self.unipro_version) >= 3.0)
             if use_univ_v3_thresholds:
                 if self.gear == 5:
-                    return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G5_RX_V6/2) + abs(y)/V_DIF_AC_HS_G5_RX_V6) <= 1
+                    return (abs(nearest_x - eye_center_timing_adj)/(T_EYE_HS_G5_RX_V6/2) + abs(nearest_y)/V_DIF_AC_HS_G5_RX_V6) <= 1
                 else:
-                    return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G4_RX_V6/2) + abs(y)/V_DIF_AC_HS_G4_RX_V6) <= 1
+                    return (abs(nearest_x - eye_center_timing_adj)/(T_EYE_HS_G4_RX_V6/2) + abs(nearest_y)/V_DIF_AC_HS_G4_RX_V6) <= 1
             else:
                 if self.gear == 5:
-                    return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G5_RX/2) + abs(y)/V_DIF_AC_HS_G5_RX) <= 1
+                    return (abs(nearest_x - eye_center_timing_adj)/(T_EYE_HS_G5_RX/2) + abs(nearest_y)/V_DIF_AC_HS_G5_RX) <= 1
                 else:
-                    return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G4_RX/2) + abs(y)/V_DIF_AC_HS_G4_RX) <= 1
+                    return (abs(nearest_x - eye_center_timing_adj)/(T_EYE_HS_G4_RX/2) + abs(nearest_y)/V_DIF_AC_HS_G4_RX) <= 1
 
     def plot_eye(self, lane_no):
         self.single_lane_eom_pass = True
