@@ -199,12 +199,12 @@ static int ufs_eom_parse_args(int argc, char *argv[], struct ufs_eom_config *cfg
 
 	if (!strcmp(argv[1], "--version")) {
 		printf("ufseom version %s\n", EOM_VERSION);
-		return ERROR;
+		return SUCCESS;
 	}
 
 	if (!strcmp(argv[1], "-h")) {
 		printf("%s\n", ufseom_help);
-		return ERROR;
+		return SUCCESS;
 	}
 
 	while ((c = getopt_long(argc, argv, short_opts, long_opts, &idx)) != -1) {
