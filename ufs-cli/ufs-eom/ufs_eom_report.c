@@ -9,6 +9,25 @@
 #include "uic.h"
 #include "ufs_eom.h"
 
+
+static const char *ufs_unipro_ver_str(int ver)
+{
+	static const char * const ver_str[] = {
+		[UFS_UNIPRO_VER_RESERVED] = "reserved",
+		[UFS_UNIPRO_VER_1_40]     = "1.40",
+		[UFS_UNIPRO_VER_1_41]     = "1.41",
+		[UFS_UNIPRO_VER_1_6]      = "1.6",
+		[UFS_UNIPRO_VER_1_61]     = "1.61",
+		[UFS_UNIPRO_VER_1_8]      = "1.8",
+		[UFS_UNIPRO_VER_2]        = "2.0",
+		[UFS_UNIPRO_VER_3]        = "3.0",
+	};
+
+	if (ver <= UFS_UNIPRO_VER_RESERVED || ver >= UFS_UNIPRO_VER_MAX)
+		return "unknown";
+	return ver_str[ver];
+}
+
 static int ufs_eom_write_report(const char *output_file,
 				struct ufs_eom_context *ctx,
 				const char *mname, const char *pname,
@@ -31,6 +50,8 @@ static int ufs_eom_write_report(const char *output_file,
 	fprintf(f, "- - - - UFS Gear Speed: HS-G%d Rate-%c\n",
 		ctx->gear,
 		ctx->rate == PA_HS_MODE_A ? 'A' : 'B');
+	fprintf(f, "- - - - UFS UNIPRO version: %s\n",
+		ufs_unipro_ver_str(caps->unipro_ver));
 	fprintf(f, "EOM Capabilities:\n");
 	fprintf(f, "TimingMaxSteps %d TimingMaxOffset %d\n",
 		caps->timing_max_steps, caps->timing_max_offset);

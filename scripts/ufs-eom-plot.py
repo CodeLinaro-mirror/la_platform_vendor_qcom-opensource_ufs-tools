@@ -21,6 +21,15 @@ T_EYE_HS_G4_RX = 0.48
 V_DIF_AC_HS_G5_RX = 30
 # Per M-PHY SPEC V5.0, eye height is 80mV for Gear-4
 V_DIF_AC_HS_G4_RX = 40
+
+# Per M-PHY SPEC V6.0, eye width is 0.45UI for Gear-5
+T_EYE_HS_G5_RX_V6 = 0.45
+# Per M-PHY SPEC V6.0, eye width is 0.48UI for Gear-4
+T_EYE_HS_G4_RX_V6 = 0.48
+# Per M-PHY SPEC V6.0, eye height is 120mV for Gear-5
+V_DIF_AC_HS_G5_RX_V6 = 60
+# Per M-PHY SPEC V6.0, eye height is 80mV for Gear-4
+V_DIF_AC_HS_G4_RX_V6 = 40
 INVALID_ERROR_COUNT = 999
 
 class ufs_eye_monitor_plot(object):
@@ -92,6 +101,7 @@ class ufs_eye_monitor_plot(object):
         self.ufs_device_size = ''
         self.ufs_gear = ''
         self.side = ''
+        self.unipro_version = ''
 
         self.fd.close()
 
@@ -123,6 +133,9 @@ class ufs_eye_monitor_plot(object):
             if 'UFS Gear Speed:' in line:
                 if line_list[4] == 'UFS' and line_list[5] == 'Gear' and line_list[6] == 'Speed:':
                     self.ufs_gear = '{:s} {:s}'.format(line_list[7], line_list[8])
+            if 'UFS UNIPRO version:' in line:
+                if line_list[4] == 'UFS' and line_list[5] == 'UNIPRO' and line_list[6] == 'version:':
+                    self.unipro_version = line_list[7]
             if 'Side Eye Monitor Start' in line:
                 if line_list[0] == 'UFS' and line_list[2] == 'Side' and line_list[3] == 'Eye' and line_list[4] == 'Monitor' and line_list[5] == 'Start':
                     self.side = line_list[1]
@@ -169,6 +182,9 @@ class ufs_eye_monitor_plot(object):
             return False
         if self.voltage_step == 0:
             print('Missing this line: VoltageMaxSteps <>, VoltageMaxOffset <>')
+            return False
+        if self.unipro_version == '':
+            print('Missing this line: UFS UNIPRO version: <>')
             return False
 
         print('-' * 50)
@@ -346,10 +362,17 @@ class ufs_eye_monitor_plot(object):
         eye_center_step = self.lane0_eye_center if lane_no == 0 else self.lane1_eye_center
         if eye_center_step is not None:
             eye_center_timing_adj = round((eye_center_step * self.timing_step), 4)
-            if self.gear == 5:
-                return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G5_RX/2) + abs(y)/V_DIF_AC_HS_G5_RX) <= 1
+            use_univ_v3_thresholds = (float(self.unipro_version) >= 3.0)
+            if use_univ_v3_thresholds:
+                if self.gear == 5:
+                    return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G5_RX_V6/2) + abs(y)/V_DIF_AC_HS_G5_RX_V6) <= 1
+                else:
+                    return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G4_RX_V6/2) + abs(y)/V_DIF_AC_HS_G4_RX_V6) <= 1
             else:
-                return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G4_RX/2) + abs(y)/V_DIF_AC_HS_G4_RX) <= 1
+                if self.gear == 5:
+                    return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G5_RX/2) + abs(y)/V_DIF_AC_HS_G5_RX) <= 1
+                else:
+                    return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G4_RX/2) + abs(y)/V_DIF_AC_HS_G4_RX) <= 1
 
     def plot_eye(self, lane_no):
         self.single_lane_eom_pass = True
@@ -376,12 +399,21 @@ class ufs_eye_monitor_plot(object):
             print('wrong lane_no')
             return False
 
-        if self.gear == 5:
-            eye_width = T_EYE_HS_G5_RX/2/self.timing_step
-            eye_height = V_DIF_AC_HS_G5_RX/self.voltage_step
+        use_univ_v3_thresholds = (float(self.unipro_version) >= 3.0)
+        if use_univ_v3_thresholds:
+            if self.gear == 5:
+                eye_width = T_EYE_HS_G5_RX_V6/2/self.timing_step
+                eye_height = V_DIF_AC_HS_G5_RX_V6/self.voltage_step
+            else:
+                eye_width = T_EYE_HS_G4_RX_V6/2/self.timing_step
+                eye_height = V_DIF_AC_HS_G4_RX_V6/self.voltage_step
         else:
-            eye_width = T_EYE_HS_G4_RX/2/self.timing_step
-            eye_height = V_DIF_AC_HS_G4_RX/self.voltage_step
+            if self.gear == 5:
+                eye_width = T_EYE_HS_G5_RX/2/self.timing_step
+                eye_height = V_DIF_AC_HS_G5_RX/self.voltage_step
+            else:
+                eye_width = T_EYE_HS_G4_RX/2/self.timing_step
+                eye_height = V_DIF_AC_HS_G4_RX/self.voltage_step
 
         fig, ax1 = plt.subplots(sharex=True, sharey=True)
 
