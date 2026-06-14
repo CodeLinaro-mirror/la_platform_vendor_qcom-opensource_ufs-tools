@@ -21,6 +21,15 @@ T_EYE_HS_G4_RX = 0.48
 V_DIF_AC_HS_G5_RX = 30
 # Per M-PHY SPEC V5.0, eye height is 80mV for Gear-4
 V_DIF_AC_HS_G4_RX = 40
+
+# Per M-PHY SPEC V6.0, eye width is 0.45UI for Gear-5
+T_EYE_HS_G5_RX_V6 = 0.45
+# Per M-PHY SPEC V6.0, eye width is 0.48UI for Gear-4
+T_EYE_HS_G4_RX_V6 = 0.48
+# Per M-PHY SPEC V6.0, eye height is 120mV for Gear-5
+V_DIF_AC_HS_G5_RX_V6 = 60
+# Per M-PHY SPEC V6.0, eye height is 80mV for Gear-4
+V_DIF_AC_HS_G4_RX_V6 = 40
 INVALID_ERROR_COUNT = 999
 
 class ufs_eye_monitor_plot(object):
@@ -39,10 +48,6 @@ class ufs_eye_monitor_plot(object):
         else:
             num = int(str_val.split(',')[0])
         return num
-
-    def quit_with_err_msg(self, msg):
-        print('ERROR: {:s}'.format(msg))
-        exit(-1)
 
     def open_file(self, filename):
         self.file_name = filename
@@ -96,6 +101,9 @@ class ufs_eye_monitor_plot(object):
         self.ufs_device_size = ''
         self.ufs_gear = ''
         self.side = ''
+        self.unipro_version = ''
+
+        self.fd.close()
 
         for line in self.file_data:
             self.line_no += 1
@@ -125,6 +133,9 @@ class ufs_eye_monitor_plot(object):
             if 'UFS Gear Speed:' in line:
                 if line_list[4] == 'UFS' and line_list[5] == 'Gear' and line_list[6] == 'Speed:':
                     self.ufs_gear = '{:s} {:s}'.format(line_list[7], line_list[8])
+            if 'UFS UNIPRO version:' in line:
+                if line_list[4] == 'UFS' and line_list[5] == 'UNIPRO' and line_list[6] == 'version:':
+                    self.unipro_version = line_list[7]
             if 'Side Eye Monitor Start' in line:
                 if line_list[0] == 'UFS' and line_list[2] == 'Side' and line_list[3] == 'Eye' and line_list[4] == 'Monitor' and line_list[5] == 'Start':
                     self.side = line_list[1]
@@ -161,14 +172,20 @@ class ufs_eye_monitor_plot(object):
                 key = 't#{:d}#v#{:d}'.format(timing, voltage)
                 self.lane1_data[key] = error_count
             else:
-                self.quit_with_err_msg('wrong lane number on line {:d}'.format(self.line_no))
+                print('wrong lane number on line {:d}'.format(self.line_no))
+                return False
 
         if self.bad_data_count != 0:
-            return
+            return False
         if self.timing_step == 0:
-            self.quit_with_err_msg('Missing this line: TimingMaxSteps <>, TimingMaxOffset <>')
+            print('Missing this line: TimingMaxSteps <>, TimingMaxOffset <>')
+            return False
         if self.voltage_step == 0:
-            self.quit_with_err_msg('Missing this line: VoltageMaxSteps <>, VoltageMaxOffset <>')
+            print('Missing this line: VoltageMaxSteps <>, VoltageMaxOffset <>')
+            return False
+        if self.unipro_version == '':
+            print('Missing this line: UFS UNIPRO version: <>')
+            return False
 
         print('-' * 50)
         print('Parsed [{:d}] lines from the log file [{:s}]\n'.format(self.line_no, filename))
@@ -198,7 +215,7 @@ class ufs_eye_monitor_plot(object):
                             self.lane1_error_count_list.append(INVALID_ERROR_COUNT)
                     else:
                         print('wrong lane_no')
-                        return
+                        return False
 
         #Lane-0 data tweaks
         self.lane0_timing_list_set = sorted(set(self.lane0_timing_list), key=int)
@@ -235,9 +252,11 @@ class ufs_eye_monitor_plot(object):
         for lane in self.lane_list:
             missing_data_count = self.validate_data(lane)
             if missing_data_count != 0:
-                return
+                return False
             # Calculate eye center
-            self.calculate_eye_width_center(lane)
+            eye_width_result = self.calculate_eye_width_center(lane)
+            if eye_width_result == False:
+                return False
             self.eom_pass.append(self.plot_eye(lane))
 
         return all(self.eom_pass)
@@ -265,7 +284,7 @@ class ufs_eye_monitor_plot(object):
             max_volt = self.lane1_voltage_list_set[-1]
         else:
             print('wrong lane_no')
-            return
+            return False
 
         max_volt += 1
         for time in range(min_time, max_time):
@@ -313,7 +332,7 @@ class ufs_eye_monitor_plot(object):
             lane_data = self.lane1_data
         else:
             print('wrong lane_no in calculate_eye_center')
-            return
+            return False
 
         # Find right and left eye boundaries using the helper function
         right_eye_width_boundary = self.find_eye_width_boundary(lane_data, 'right')
@@ -338,15 +357,33 @@ class ufs_eye_monitor_plot(object):
                 self.lane1_eye_center = None
 
     def in_eye_mask(self, x, y, lane_no):
+        """
+        Check if any part of the cell at (x, y) overlaps with the eye mask diamond.
+        x and y are the cell center coordinates (UI and mV).
+        Each cell spans [x-timing_step/2, x+timing_step/2] x [y-voltage_step/2, y+voltage_step/2].
+        We find the nearest point of the cell to the diamond center and check if it is inside the mask.
+        """
         assert((lane_no == 0) or (lane_no == 1))
         eye_center_timing_adj = None
         eye_center_step = self.lane0_eye_center if lane_no == 0 else self.lane1_eye_center
         if eye_center_step is not None:
             eye_center_timing_adj = round((eye_center_step * self.timing_step), 4)
-            if self.gear == 5:
-                return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G5_RX/2) + abs(y)/V_DIF_AC_HS_G5_RX) <= 1
+            half_t = self.timing_step / 2.0
+            half_v = self.voltage_step / 2.0
+            # Nearest point of the cell to the diamond center (eye_center_timing_adj, 0)
+            nearest_x = max(x - half_t, min(x + half_t, eye_center_timing_adj))
+            nearest_y = max(y - half_v, min(y + half_v, 0.0))
+            use_univ_v3_thresholds = (float(self.unipro_version) >= 3.0)
+            if use_univ_v3_thresholds:
+                if self.gear == 5:
+                    return (abs(nearest_x - eye_center_timing_adj)/(T_EYE_HS_G5_RX_V6/2) + abs(nearest_y)/V_DIF_AC_HS_G5_RX_V6) <= 1
+                else:
+                    return (abs(nearest_x - eye_center_timing_adj)/(T_EYE_HS_G4_RX_V6/2) + abs(nearest_y)/V_DIF_AC_HS_G4_RX_V6) <= 1
             else:
-                return (abs(x - eye_center_timing_adj)/(T_EYE_HS_G4_RX/2) + abs(y)/V_DIF_AC_HS_G4_RX) <= 1
+                if self.gear == 5:
+                    return (abs(nearest_x - eye_center_timing_adj)/(T_EYE_HS_G5_RX/2) + abs(nearest_y)/V_DIF_AC_HS_G5_RX) <= 1
+                else:
+                    return (abs(nearest_x - eye_center_timing_adj)/(T_EYE_HS_G4_RX/2) + abs(nearest_y)/V_DIF_AC_HS_G4_RX) <= 1
 
     def plot_eye(self, lane_no):
         self.single_lane_eom_pass = True
@@ -371,14 +408,23 @@ class ufs_eye_monitor_plot(object):
             lane_voltage_list_set = self.lane1_voltage_list_set
         else:
             print('wrong lane_no')
-            return
+            return False
 
-        if self.gear == 5:
-            eye_width = T_EYE_HS_G5_RX/2/self.timing_step
-            eye_height = V_DIF_AC_HS_G5_RX/self.voltage_step
+        use_univ_v3_thresholds = (float(self.unipro_version) >= 3.0)
+        if use_univ_v3_thresholds:
+            if self.gear == 5:
+                eye_width = T_EYE_HS_G5_RX_V6/2/self.timing_step
+                eye_height = V_DIF_AC_HS_G5_RX_V6/self.voltage_step
+            else:
+                eye_width = T_EYE_HS_G4_RX_V6/2/self.timing_step
+                eye_height = V_DIF_AC_HS_G4_RX_V6/self.voltage_step
         else:
-            eye_width = T_EYE_HS_G4_RX/2/self.timing_step
-            eye_height = V_DIF_AC_HS_G4_RX/self.voltage_step
+            if self.gear == 5:
+                eye_width = T_EYE_HS_G5_RX/2/self.timing_step
+                eye_height = V_DIF_AC_HS_G5_RX/self.voltage_step
+            else:
+                eye_width = T_EYE_HS_G4_RX/2/self.timing_step
+                eye_height = V_DIF_AC_HS_G4_RX/self.voltage_step
 
         fig, ax1 = plt.subplots(sharex=True, sharey=True)
 
@@ -407,7 +453,7 @@ class ufs_eye_monitor_plot(object):
             self.voltage_max_steps, self.voltage_max_offset, self.voltage_step, lane_voltage_list_set[0], lane_voltage_list_set[-1],
             len(lane_voltage_list_set))
         else:
-            title_2 = 'Y-axis  : Voltage: Voltage Information is missing in the log'
+            title_3 = 'Y-axis  : Voltage: Voltage Information is missing in the log'
 
         eye_center_step = None
         eye_center_step = self.lane0_eye_center if lane_no == 0 else self.lane1_eye_center
@@ -420,6 +466,8 @@ class ufs_eye_monitor_plot(object):
                         self.single_lane_eom_pass = False
                     if e == INVALID_ERROR_COUNT:
                         self.single_lane_eom_skip_result = True
+            else:
+                self.single_lane_eom_pass = False
 
         title = title_1 + '\n' + title_2 + '\n' + title_3
         ax2.set_title(title, fontsize=17, fontweight='bold', loc='center')
