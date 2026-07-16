@@ -1,7 +1,5 @@
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 // SPDX-License-Identifier: BSD-3-Clause-Clear
-/*
- * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
- */
 
 #include "common.h"
 
@@ -74,4 +72,59 @@ int characteristics_look_up(struct ufs_characteristics *c, __u32 id)
 		return INIT;
 
 	return i;
+}
+
+/**
+ * dump_hex - Hexadecimal dump of data
+ * @buf: Descriptor data buffer
+ * @len: Length of buffer
+ */
+void dump_hex(__u8 *buf, __u16 len)
+{
+	__u32 offset;
+
+	printf("\nHex Dump Raw Data:\n");
+
+	for (offset = 0; offset < len; offset++) {
+		if (offset % 16 == 0)
+			printf("0x%02x: ", offset);
+
+		printf("%02x ", buf[offset]);
+
+		if (offset % 16 == 15)
+			printf("\n");
+	}
+
+	if (offset % 16 != 0)
+		printf("\n");
+}
+
+int u32_to_str(uint32_t val, char *buf, size_t size)
+{
+	if (!buf || size == 0) {
+		printf("Invalid buf or size\n");
+		return ERROR;
+	}
+	snprintf(buf, size, "%u", val);
+
+	return SUCCESS;
+}
+
+/**
+ * fast_rand64() - Fast pseudo-random 64-bit number generator (LCG).
+ *
+ * @seed: Pointer to the current PRNG state.
+ *
+ * Returns the next pseudo-random 64-bit value and updates *seed in place.
+ * Suitable for generating I/O stress data patterns; not cryptographically
+ * secure.
+ */
+uint64_t fast_rand64(uint64_t *seed)
+{
+	uint64_t val = *seed;
+
+	val = (370003845LL * val + 3037000493LL);
+	*seed = val & 0x1F;
+
+	return val & 0x7FFFFFFFFFFFFFFFLL;
 }
