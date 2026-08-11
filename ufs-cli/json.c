@@ -1,29 +1,10 @@
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
+
 #include "common.h"
 #include "query.h"
 #include "uic.h"
-
-struct eom_result {
-	int lane;
-	int timing;
-	int volt;
-	int error_cnt;
-};
-
-struct EOMData {
-	int timing_max_steps;
-	int timing_max_offset;
-	int voltage_max_steps;
-	int voltage_max_offset;
-	int data_cnt;
-	int num_lanes;
-	int local_peer;
-	int gear;
-	int rate;
-
-	struct eom_result *er;
-};
-
-extern int get_device_info(char *mname, char *pname, char *pversion);
+#include "ufs_eom.h"
 
 int generate_json_report(char *eom_file, struct EOMData *data)
 {
